@@ -5,6 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage
 import logging
+import re
 from typing import List, Optional
 from io import BytesIO
 import base64
@@ -55,6 +56,10 @@ class ChatService:
             "- NEVER ask the user to re-upload files - they're already provided\n"
             "- Directly answer questions using the file content\n"
             "- If a file is marked as error, inform the user about the specific error\n\n"
+            "RAG CONTEXT RULES:\n"
+            "- RAG context from uploaded PDFs is optional support context, not mandatory output\n"
+            "- Use RAG context only when it is clearly relevant to the user's current prompt\n"
+            "- If current prompt is unrelated, ignore RAG context and answer the prompt directly\n\n"
             "MATH/FORMULA RULES:\n"
             "- For formulas, always provide the mathematical expression clearly\n"
             "- Use proper notation: $E = mc^2$ for inline, $$\\\\frac{a}{b}$$ for block formulas\n"
@@ -63,8 +68,10 @@ class ChatService:
             "CONVERSATION HISTORY RULES:\n"
             "- You have access to the CURRENT conversation history below\n"
             "- Use it to answer questions like 'what was my first message' or 'what did you say earlier'\n"
+            "- Never proactively list or suggest old topics from history unless the user explicitly asks for past topics/history\n"
             "- Reference previous messages accurately\n"
             "- Prioritize the user's latest intent; do not reuse old answer templates when the user asks a new kind of question\n"
+            "- If the user says 'my topic' or 'this topic' without naming one, ask a short clarification instead of guessing from old history\n"
             "- For prompts like 'what is the above query' or 'brief theory', explain the prior query in plain language (2-5 concise lines)\n"
             "- Be direct and concise. If asked for a formula, provide it immediately."
         )
@@ -72,13 +79,60 @@ class ChatService:
         if conversation_history:
             base_prompt += (
                 "\n\n--- CONVERSATION HISTORY ---\n"
-                "This is the conversation history for context. Use it to answer questions about what was discussed:\n\n"
+                "This is the conversation history for context. Use it only when the user asks about prior messages/topics:\n\n"
                 f"{conversation_history}\n"
                 "--- END CONVERSATION HISTORY ---\n"
-                "Use this history to provide better, more informed responses and to accurately answer questions about previous messages in this chat."
+                "Do not proactively enumerate old topics from this history."
             )
         
         return base_prompt
+
+    def _wants_document_context(self, message: str) -> bool:
+        """Return True when the user prompt likely refers to uploaded files/PDF context."""
+        text = (message or "").strip().lower()
+        if not text:
+            return False
+
+        if "===== file start:" in text or "===== rag context start =====" in text:
+            return True
+
+        direct_terms = [
+            "pdf", "document", "file", "attachment", "uploaded", "report", "paper",
+            "from the doc", "from the pdf", "from the file", "in the document",
+            "according to the document", "based on the uploaded", "from the attachment",
+        ]
+        if any(term in text for term in direct_terms):
+            return True
+
+        follow_up_patterns = [
+            r"\bsummarize\s+(it|this|that)\b",
+            r"\bexplain\s+(it|this|that)\b",
+            r"\bwhat\s+does\s+(it|this|that)\s+say\b",
+            r"\bfrom\s+above\b",
+            r"\bin\s+the\s+above\b",
+        ]
+        return any(re.search(pattern, text) for pattern in follow_up_patterns)
+
+    def _wants_cross_conversation_history(self, message: str) -> bool:
+        """Return True only when user explicitly asks to recall earlier chat history/topics."""
+        text = (message or "").strip().lower()
+        if not text:
+            return False
+
+        explicit_patterns = [
+            r"\bprevious\s+(chat|conversation|topic|message|messages)\b",
+            r"\bearlier\s+(chat|conversation|topic|message|messages)\b",
+            r"\bwhat\s+did\s+i\s+ask\b",
+            r"\bwhat\s+was\s+my\s+first\s+message\b",
+            r"\bwe\s+discussed\b",
+            r"\bfrom\s+our\s+last\s+conversation\b",
+            r"\bchat\s+history\b",
+            r"\bconversation\s+history\b",
+            r"\brecap\b",
+            r"\babove\s+query\b",
+            r"\bprevious\s+query\b",
+        ]
+        return any(re.search(pattern, text) for pattern in explicit_patterns)
 
     def _format_conversation_history(self, conversations: List) -> str:
         """
@@ -351,14 +405,19 @@ class ChatService:
         try:
             llm_input = user_message
 
+            # Check for file content in message
+            has_file_content = "===== FILE START:" in user_message or "===== FILE ERROR:" in user_message
+
             # Add retrieval context from ChromaDB for this user/conversation.
-            if user_id and conversation_id:
+            if user_id and conversation_id and self._wants_document_context(retrieval_query or user_message):
                 query = retrieval_query or user_message
                 rag_context = get_rag_service().retrieve_context(
                     query=query,
                     user_id=user_id,
                     conversation_id=conversation_id,
                     k=5,
+                    min_relevance_score=0.35,
+                    include_user_fallback=False,
                 )
                 if rag_context:
                     llm_input += (
@@ -369,10 +428,11 @@ class ChatService:
                         "===== RAG CONTEXT END ====="
                     )
                     logger.info("[ChatService] 🔎 Added retrieved RAG context to LLM input")
+                else:
+                    logger.info("[ChatService] 🔎 RAG skipped: no relevant chunks for current prompt")
+            elif user_id and conversation_id:
+                logger.info("[ChatService] 🔎 RAG skipped: prompt does not request document context")
 
-            # Check for file content in message
-            has_file_content = "===== FILE START:" in user_message or "===== FILE ERROR:" in user_message
-            
             if has_file_content:
                 logger.info(f"[ChatService] ✅ FILE CONTENT detected in message")
                 # Extract and log file information
@@ -400,11 +460,13 @@ class ChatService:
                 conversation_history = "\n".join(current_context_parts) + "\n\n"
                 logger.info(f"[ChatService] ✅ Current conversation context added: {len(conversation_history)} chars")
             
-            # Add previous conversations
-            if previous_conversations:
+            # Add previous conversations only when explicitly requested by user intent.
+            if previous_conversations and self._wants_cross_conversation_history(retrieval_query or user_message):
                 logger.info(f"[ChatService] 📚 Processing {len(previous_conversations)} previous conversations for context")
                 previous_context = self._format_conversation_history(previous_conversations)
                 conversation_history += previous_context
+            elif previous_conversations:
+                logger.info("[ChatService] 📚 Skipping previous-conversation context for non-history prompt")
             
             # Build system prompt
             system_prompt = self._build_system_prompt(conversation_history)

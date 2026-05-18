@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from typing import List
+from typing import List, Tuple
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
@@ -101,6 +101,8 @@ class RAGService:
         user_id: int,
         conversation_id: int,
         k: int = 5,
+        min_relevance_score: float = 0.35,
+        include_user_fallback: bool = False,
     ) -> str:
         """Retrieve top-k relevant chunks for a query."""
         if not query.strip():
@@ -112,28 +114,68 @@ class RAGService:
                 {"conversation_id": {"$eq": str(conversation_id)}},
             ]
         }
-        docs = self.vectorstore.similarity_search(
-            query=query,
-            k=k,
-            filter=filter_by_conversation,
-        )
+        ranked_docs: List[Tuple[Document, float]] = []
 
-        if not docs:
-            docs = self.vectorstore.similarity_search(
+        try:
+            docs_with_scores = self.vectorstore.similarity_search_with_relevance_scores(
                 query=query,
                 k=k,
-                filter={"user_id": {"$eq": str(user_id)}},
+                filter=filter_by_conversation,
             )
+            ranked_docs = [
+                (doc, score)
+                for doc, score in docs_with_scores
+                if score >= min_relevance_score
+            ]
+        except Exception:
+            # Fallback for vector stores that don't expose relevance scores.
+            docs_with_distance = self.vectorstore.similarity_search_with_score(
+                query=query,
+                k=k,
+                filter=filter_by_conversation,
+            )
+            ranked_docs = []
+            for doc, distance in docs_with_distance:
+                relevance = 1.0 / (1.0 + float(distance))
+                if relevance >= min_relevance_score:
+                    ranked_docs.append((doc, relevance))
 
-        if not docs:
+        if not ranked_docs and include_user_fallback:
+            try:
+                docs_with_scores = self.vectorstore.similarity_search_with_relevance_scores(
+                    query=query,
+                    k=k,
+                    filter={"user_id": {"$eq": str(user_id)}},
+                )
+                ranked_docs = [
+                    (doc, score)
+                    for doc, score in docs_with_scores
+                    if score >= min_relevance_score
+                ]
+            except Exception:
+                docs_with_distance = self.vectorstore.similarity_search_with_score(
+                    query=query,
+                    k=k,
+                    filter={"user_id": {"$eq": str(user_id)}},
+                )
+                for doc, distance in docs_with_distance:
+                    relevance = 1.0 / (1.0 + float(distance))
+                    if relevance >= min_relevance_score:
+                        ranked_docs.append((doc, relevance))
+
+        if not ranked_docs:
+            logger.info(
+                "[RAGService] No relevant chunks found for query (min_relevance=%s)",
+                min_relevance_score,
+            )
             return ""
 
         formatted_chunks = []
-        for idx, doc in enumerate(docs, start=1):
+        for idx, (doc, score) in enumerate(ranked_docs, start=1):
             filename = doc.metadata.get("filename", "unknown.pdf")
             chunk_index = doc.metadata.get("chunk_index", "?")
             formatted_chunks.append(
-                f"[Source {idx}] file={filename}, chunk={chunk_index}\n{doc.page_content}"
+                f"[Source {idx}] file={filename}, chunk={chunk_index}, relevance={score:.2f}\n{doc.page_content}"
             )
 
         return "\n\n".join(formatted_chunks)

@@ -11,13 +11,6 @@ interface AttachedFile {
   type: string;
 }
 
-interface Folder {
-  id: string;
-  name: string;
-  isOpen: boolean;
-  conversationIds: number[]; // Track conversations in this folder
-}
-
 interface ConversationMeta {
   [key: number]: {
     isPinned?: boolean;
@@ -48,9 +41,7 @@ export function ChatPage() {
 
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameText, setRenameText] = useState('');
-  const [selectedFolderId, setSelectedFolderId] = useState<string>('1'); // Track selected folder
   const [isDraftMode, setIsDraftMode] = useState(false); // Track if current chat is a draft (not yet saved)
-  const [draftFolderId, setDraftFolderId] = useState<string>('1'); // Track which folder the draft belongs to
   const [contextMenuConvId, setContextMenuConvId] = useState<number | null>(null);
   
   // Load pin/archive states from localStorage on mount
@@ -72,49 +63,21 @@ export function ChatPage() {
       console.error('Failed to save conversationMeta to localStorage:', e);
     }
   }, [conversationMeta]);
-  const [folders, setFolders] = useState<Folder[]>(() => {
-    // Initialize folders with all existing conversations
-    const defaultFolders: Folder[] = [
-      { id: '1', name: 'Projects', isOpen: true, conversationIds: [] },
-      { id: '2', name: 'Personal', isOpen: false, conversationIds: [] },
-      { id: '3', name: 'Work', isOpen: false, conversationIds: [] },
-    ];
-    
-    // If there are conversations, add them to Projects folder
-    if (conversations && conversations.length > 0) {
-      const convIds = conversations.map(c => c.id);
-      defaultFolders[0].conversationIds = convIds;
-    }
-    
-    return defaultFolders;
-  });
-  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
-  const [renameFolderText, setRenameFolderText] = useState('');
-  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
-
-  // Sync conversations to folders - REMOVED (conversations now show in Recents, not folders)
-  // Only show conversations in folders if explicitly added to that folder
-
 
   const handleLogout = () => {
     apiClient.logout();
     window.location.href = '/login';
   };
 
-  const handleNewChatInFolder = async (folderId: string) => {
+  const handleNewChat = async () => {
     // If already in draft mode with no messages, just reuse the same draft
     if (isDraftMode && messages.length === 0) {
       console.log(`[ChatPage] Already in draft mode, reusing existing draft`);
-      setSelectedFolderId(folderId);
-      setDraftFolderId(folderId);
       return;
     }
     
     // Otherwise, enter new draft mode
-    console.log(`[ChatPage] Starting new draft chat in folder ${folderId}`);
-    setSelectedFolderId(folderId);
-    setDraftFolderId(folderId);
+    console.log('[ChatPage] Starting new draft chat');
     setIsDraftMode(true);
     clearMessages();
     clearConversation(); // Clear currentConversation to show blank chat
@@ -157,7 +120,7 @@ export function ChatPage() {
     
     // If in draft mode, create the conversation first
     if (isDraftMode) {
-      console.log(`[ChatPage] Creating new conversation in draft folder ${draftFolderId}`);
+      console.log('[ChatPage] Creating new conversation from draft mode');
       const newConversation = await createNewConversation();
       
       if (newConversation?.id) {
@@ -234,18 +197,6 @@ export function ChatPage() {
     setContextMenuConvId(null);
   };
 
-  const handleMoveToProject = (convId: number, folderId: string) => {
-    setFolders((prev) =>
-      prev.map((folder) =>
-        folder.id === folderId
-          ? { ...folder, conversationIds: Array.from(new Set([...folder.conversationIds, convId])) }
-          : folder
-      )
-    );
-    setContextMenuConvId(null);
-    console.log(`[ChatPage] Moved conversation ${convId} to folder ${folderId}`);
-  };
-
   const handlePinConversation = (convId: number) => {
     setConversationMeta((prev) => ({
       ...prev,
@@ -277,59 +228,6 @@ export function ChatPage() {
     }
   };
 
-  // Folder management functions
-  const toggleFolder = (folderId: string) => {
-    setFolders((prev) =>
-      prev.map((folder) =>
-        folder.id === folderId ? { ...folder, isOpen: !folder.isOpen } : folder
-      )
-    );
-  };
-
-  const startRenameFolderFolder = (e: React.MouseEvent, folderId: string, folderName: string) => {
-    e.stopPropagation();
-    setRenamingFolder(folderId);
-    setRenameFolderText(folderName);
-  };
-
-  const saveRenameFolder = (e: React.MouseEvent, folderId: string) => {
-    e.stopPropagation();
-    if (renameFolderText.trim()) {
-      setFolders((prev) =>
-        prev.map((folder) =>
-          folder.id === folderId ? { ...folder, name: renameFolderText } : folder
-        )
-      );
-    }
-    setRenamingFolder(null);
-  };
-
-  const cancelRenameFolder = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setRenamingFolder(null);
-  };
-
-  const deleteFolder = (e: React.MouseEvent, folderId: string) => {
-    e.stopPropagation();
-    if (confirm('Delete this folder and all its conversations?')) {
-      setFolders((prev) => prev.filter((folder) => folder.id !== folderId));
-    }
-  };
-
-  const createNewFolder = () => {
-    if (newFolderName.trim()) {
-      const newFolder: Folder = {
-        id: Date.now().toString(),
-        name: newFolderName,
-        isOpen: true,
-        conversationIds: [],
-      };
-      setFolders((prev) => [...prev, newFolder]);
-      setNewFolderName('');
-      setShowNewFolderInput(false);
-    }
-  };
-
   return (
     <div className="flex h-screen bg-white">
       {/* Sidebar */}
@@ -344,147 +242,16 @@ export function ChatPage() {
             </div>
           </div>
           <button
-            onClick={() => handleNewChatInFolder(selectedFolderId)}
+            onClick={handleNewChat}
             className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2"
           >
             <span className="text-lg">+</span> New Chat
           </button>
         </div>
 
-        {/* PINNED PROJECTS/FOLDERS SECTION - Always visible */}
-        <div className="bg-gray-850 border-y border-gray-700 p-2">
-          <div className="text-xs font-semibold text-gray-400 uppercase px-2 py-2 mb-2">
-            📁 Projects
-          </div>
-          <div className="space-y-1">
-            {folders.map((folder) => (
-              <div key={folder.id} className="mb-1">
-                {/* Folder Header */}
-                <div className="flex items-center justify-between px-3 py-2 hover:bg-gray-800 rounded-lg transition group">
-                  <div
-                    className="flex items-center gap-2 flex-1 cursor-pointer"
-                    onClick={() => toggleFolder(folder.id)}
-                  >
-                    <span className="text-lg">{folder.isOpen ? '📂' : '📁'}</span>
-                    {renamingFolder === folder.id ? (
-                      <input
-                        autoFocus
-                        type="text"
-                        value={renameFolderText}
-                        onChange={(e) => setRenameFolderText(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="px-2 py-1 rounded bg-gray-700 text-white text-sm border border-gray-600 focus:border-blue-500 outline-none flex-1"
-                        placeholder="Folder name"
-                      />
-                    ) : (
-                      <span 
-                        className="text-sm font-medium text-gray-200 flex-1 truncate cursor-pointer hover:text-white"
-                        onClick={() => {
-                          setSelectedFolderId(folder.id);
-                          if (!folder.isOpen) toggleFolder(folder.id);
-                        }}
-                      >
-                        {folder.name}
-                      </span>
-                    )}
-                  </div>
-                  
-                  {/* Folder Actions */}
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                    {renamingFolder === folder.id ? (
-                      <>
-                        <button
-                          onClick={(e) => saveRenameFolder(e, folder.id)}
-                          className="text-green-400 hover:text-green-300 text-xs"
-                          title="Save"
-                        >
-                          ✓
-                        </button>
-                        <button
-                          onClick={cancelRenameFolder}
-                          className="text-gray-400 hover:text-red-500 text-xs"
-                          title="Cancel"
-                        >
-                          ✕
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleNewChatInFolder(folder.id);
-                          }}
-                          className="text-gray-400 hover:text-green-400 text-xs"
-                          title="New chat in this folder"
-                        >
-                          +
-                        </button>
-                        <button
-                          onClick={(e) => startRenameFolderFolder(e, folder.id, folder.name)}
-                          className="text-gray-400 hover:text-yellow-500 text-xs"
-                          title="Rename"
-                        >
-                          ✎
-                        </button>
-                        <button
-                          onClick={(e) => deleteFolder(e, folder.id)}
-                          className="text-gray-400 hover:text-red-500 text-xs"
-                          title="Delete"
-                        >
-                          ✕
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* New Folder Button - In pinned section */}
-          <div className="mt-3 px-2">
-            {showNewFolderInput ? (
-              <div className="flex gap-2">
-                <input
-                  autoFocus
-                  type="text"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && createNewFolder()}
-                  placeholder="New folder name"
-                  className="flex-1 px-2 py-1 rounded bg-gray-700 text-white text-sm border border-gray-600 focus:border-blue-500 outline-none"
-                />
-                <button
-                  onClick={createNewFolder}
-                  className="text-green-400 hover:text-green-300 transition text-xs"
-                >
-                  ✓
-                </button>
-                <button
-                  onClick={() => {
-                    setShowNewFolderInput(false);
-                    setNewFolderName('');
-                  }}
-                  className="text-gray-400 hover:text-red-500 transition text-xs"
-                >
-                  ✕
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowNewFolderInput(true)}
-                className="w-full flex items-center justify-center gap-2 px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300 hover:text-white text-xs font-medium transition"
-              >
-                <span>+</span> New Folder
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Folders & Conversations List */}
+        {/* Conversations List */}
         <div className="flex-1 overflow-y-auto">
-          {conversations.length === 0 && folders.length === 0 ? (
+          {conversations.length === 0 ? (
             <div className="p-4 text-gray-400 text-sm">
               No conversations yet. Start a new chat!
             </div>
@@ -634,33 +401,6 @@ export function ChatPage() {
                                       >
                                         <span>✏️</span> Rename
                                       </button>
-
-                                      {/* Move to Project Submenu */}
-                                      <div className="border-t border-gray-200">
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                          }}
-                                          className="w-full flex items-center gap-2 px-4 py-2 hover:bg-gray-100 text-gray-700 text-sm transition justify-between"
-                                        >
-                                          <span>📁 Move to project</span>
-                                          <span>→</span>
-                                        </button>
-                                        <div className="bg-gray-50 py-1">
-                                          {folders.map((folder) => (
-                                            <button
-                                              key={folder.id}
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleMoveToProject(conv.id, folder.id);
-                                              }}
-                                              className="w-full text-left px-6 py-1.5 hover:bg-gray-100 text-gray-700 text-xs transition"
-                                            >
-                                              {folder.name}
-                                            </button>
-                                          ))}
-                                        </div>
-                                      </div>
 
                                       <button
                                         onClick={(e) => {

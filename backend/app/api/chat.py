@@ -4,7 +4,6 @@ from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import logging
-import re
 from typing import Optional, List
 import json
 
@@ -33,54 +32,10 @@ from app.services.url_service import URLService
 from app.services.sql_qa_service import get_sql_qa_service
 from app.services.dataframe_qa_service import get_dataframe_qa_service
 from app.services.dataframe_cache import get_dataframe_cache
-from app.services.pandas_agent_service import get_pandas_agent_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-
-
-def _should_route_to_dataframe_followup(message: str, columns: List[str]) -> bool:
-    """Decide if a follow-up message should use cached dataframe QA."""
-    text = (message or "").strip().lower()
-    if not text:
-        return False
-
-    # Questions asking for conceptual explanation should stay in general chat.
-    conceptual_patterns = [
-        r"\bbrief theory\b",
-        r"\bexplain\b",
-        r"\bwhat is the above query\b",
-        r"\bmeaning\b",
-        r"\bdefinition\b",
-        r"\bhow does (this|that|it) work\b",
-    ]
-    if any(re.search(pattern, text) for pattern in conceptual_patterns):
-        # Let this fall through to normal LLM chat unless clearly analytical.
-        has_math_intent = any(
-            token in text
-            for token in ["sum", "average", "mean", "count", "max", "min", "total", "calculate"]
-        )
-        if not has_math_intent:
-            return False
-
-    analytical_keywords = [
-        "sum", "total", "average", "avg", "mean", "count", "max", "min",
-        "highest", "lowest", "top", "bottom", "group by", "filter", "where",
-        "calculate", "compute", "compare", "percentage", "distribution",
-        "how many", "list", "show", "find", "column", "rows", "dataset", "sheet",
-    ]
-    if any(keyword in text for keyword in analytical_keywords):
-        return True
-
-    # If the message references any known dataframe column, route to dataframe QA.
-    normalized_text = re.sub(r"[^a-z0-9]", "", text)
-    for col in columns:
-        col_norm = re.sub(r"[^a-z0-9]", "", str(col).lower())
-        if col_norm and col_norm in normalized_text:
-            return True
-
-    return False
 
 
 @router.post("/message", response_model=ChatMessageResponse)
@@ -238,88 +193,6 @@ async def send_message(
                 logger.error(f"[Chat] ❌❌❌ FILES WERE PROCESSED BUT file_contents is EMPTY!")
         else:
             logger.info(f"[Chat] No files - text only message")
-
-            # If tabular data is cached for this conversation, answer follow-up questions from that dataframe.
-            df_cache = get_dataframe_cache()
-            cached_data = df_cache.retrieve(conversation_id)
-            if cached_data:
-                if _should_route_to_dataframe_followup(user_message, cached_data.columns):
-                    logger.info(
-                        "[Chat][DATAFRAME_FOLLOWUP] Using cached %s for conv_id=%s (%s rows, %s cols)",
-                        cached_data.source,
-                        conversation_id,
-                        cached_data.row_count,
-                        len(cached_data.columns),
-                    )
-
-                    pandas_agent_service = get_pandas_agent_service()
-                    agent_result = pandas_agent_service.query(
-                        df=cached_data.df,
-                        question=user_message,
-                        source=f"cached:{cached_data.display_name}",
-                    )
-
-                    if agent_result.get("success"):
-                        assistant_response = agent_result.get("answer", "")
-                        ConversationService.add_message(db, conversation_id, user.id, "user", user_message)
-                        ConversationService.add_message(db, conversation_id, user.id, "assistant", assistant_response)
-                        logger.info(
-                            "[Chat][DATAFRAME_FOLLOWUP] Answered from cache, len=%s",
-                            len(assistant_response),
-                        )
-                        return ChatMessageResponse(
-                            user_message=user_message,
-                            assistant_response=assistant_response,
-                        )
-
-                    logger.warning(
-                        "[Chat][DATAFRAME_FOLLOWUP] Cached dataframe query failed, falling back to normal chat: %s",
-                        agent_result.get("error"),
-                    )
-                else:
-                    logger.info(
-                        "[Chat][DATAFRAME_FOLLOWUP] Cached dataframe exists but prompt is conceptual; using normal chat flow"
-                    )
-
-            # Dynamic meta-followup handling: explain the immediately previous query/answer in this chat.
-            meta_followup_patterns = [
-                r"\babove\s+query\b",
-                r"\bprevious\s+query\b",
-                r"\bwhat\s+did\s+i\s+ask\b",
-                r"\bexplain\s+the\s+query\b",
-            ]
-            if any(re.search(pattern, user_message.lower()) for pattern in meta_followup_patterns):
-                current_conv = ConversationService.get_conversation(db, conversation_id, user.id)
-                if current_conv and current_conv.messages:
-                    ordered = sorted(current_conv.messages, key=lambda m: m.created_at)
-                    previous_user = None
-                    previous_assistant = None
-
-                    # Walk backward to find latest assistant and user messages before current turn.
-                    for msg in reversed(ordered):
-                        if previous_assistant is None and msg.sender == "assistant":
-                            previous_assistant = msg.content
-                        elif previous_user is None and msg.sender == "user":
-                            previous_user = msg.content
-                        if previous_user and previous_assistant:
-                            break
-
-                    if previous_user or previous_assistant:
-                        context_parts = []
-                        if previous_user:
-                            context_parts.append(f"Previous user query: {previous_user}")
-                        if previous_assistant:
-                            context_parts.append(f"Previous assistant answer: {previous_assistant}")
-
-                        message_content = (
-                            f"{user_message}\n\n"
-                            "[FOLLOW_UP_CONTEXT]\n"
-                            + "\n".join(context_parts)
-                            + "\n\n"
-                            "Explain the previous query in simple, concise language. "
-                            "Do not fabricate data and do not output code unless requested."
-                        )
-                        logger.info("[Chat][META_FOLLOWUP] Injected previous query/answer context")
             
             # ✨ NEW: For follow-up questions, retrieve file context from previous messages
             logger.info(f"[Chat] 🔍 Checking for file context from previous messages in conversation {conversation_id}")
@@ -404,6 +277,38 @@ async def send_message(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "llm_error", "message": str(e)},
+        )
+
+
+class ImageGenerateRequest(BaseModel):
+    prompt: str
+    size: str = "1024x1024"
+
+
+@router.post("/generate-image")
+async def generate_image(
+    request: ImageGenerateRequest,
+    user_email: str = Depends(get_current_user_email),
+):
+    """
+    Generate an image from a text prompt using Gemini Imagen via LiteLLM proxy.
+
+    Returns:
+        JSON with url, revised_prompt, model, source.
+    """
+    try:
+        logger.info(f"[Chat] 🎨 Image generation request from {user_email}: {request.prompt[:80]}")
+        image_service = get_image_service()
+        result = await image_service.generate_image(request.prompt, request.size)
+        logger.info(f"[Chat] ✅ Image generated successfully")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Chat] ❌ Image generation failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "image_generation_error", "message": str(e)},
         )
 
 
@@ -657,24 +562,12 @@ async def generate_image(
             prompt=request.prompt,
             size=request.size,
         )
-
-        revised_prompt = image_data.get("revised_prompt")
-        if not isinstance(revised_prompt, str) or not revised_prompt.strip():
-            revised_prompt = request.prompt
-
-        generated_url = image_data.get("url", "")
-        if isinstance(generated_url, str):
-            logger.info(
-                "[ImageGeneration] URL format=%s length=%s",
-                "data-url" if generated_url.startswith("data:") else "remote-url",
-                len(generated_url),
-            )
         
         logger.info(f"[ImageGeneration] ✅ Image generated successfully for user: {user.email}")
         return GenerateImageResponse(
-            url=generated_url,
+            url=image_data["url"],
             prompt=request.prompt,
-            revised_prompt=revised_prompt,
+            revised_prompt=image_data["revised_prompt"],
             model=image_data.get("model", "gemini-2.0-flash"),
             source=image_data.get("source", "google-gemini"),
         )
@@ -701,7 +594,6 @@ class URLAnalysisResponse(BaseModel):
     """Response with analyzed URL content."""
     user_message: str
     assistant_response: str
-    conversation_id: Optional[int] = None
 
 
 # ============ Database Q&A Endpoint ============
@@ -878,15 +770,7 @@ async def ask_dataframe_question(
                 conversation_id
             )
 
-        pandas_agent_service = get_pandas_agent_service()
-        agent_result = pandas_agent_service.query(
-            df=df,
-            question=question,
-            source=source,
-        )
-
-        if not agent_result.get("success"):
-            raise ValueError(agent_result.get("error") or "Pandas agent failed to answer the question")
+        result = dataframe_service.answer_question(df=df, question=question, source=source)
 
         conv_id = conversation_id
         if not conv_id:
@@ -899,15 +783,15 @@ async def ask_dataframe_question(
             conv_id,
             user.id,
             "assistant",
-            agent_result["answer"],
+            result.answer,
         )
 
         return DataframeQuestionResponse(
-            user_message=question,
-            assistant_response=agent_result["answer"],
-            source=agent_result.get("source"),
-            row_count=agent_result.get("row_count"),
-            columns=agent_result.get("columns"),
+            user_message=result.question,
+            assistant_response=result.answer,
+            source=result.source,
+            row_count=result.row_count,
+            columns=result.columns,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -943,10 +827,9 @@ async def analyze_url(
     Returns:
         URLAnalysisResponse with assistant analysis.
     """
-    logger.info("[URLAnalysis] ========== NEW URL ANALYSIS REQUEST ==========")
-    logger.info("[URLAnalysis] URL: %s", request.url)
-    logger.info("[URLAnalysis] User message: %s", request.user_message)
-    logger.info("[URLAnalysis] conversation_id=%s", request.conversation_id)
+    logger.info(f"[URLAnalysis] ========== NEW URL ANALYSIS REQUEST ==========")
+    logger.info(f"[URLAnalysis] URL: {request.url}")
+    logger.info(f"[URLAnalysis] User message: {request.user_message}")
     
     try:
         # Verify user exists
@@ -961,107 +844,11 @@ async def analyze_url(
         # Process URL/video and extract content
         logger.info(f"[URLAnalysis] Processing URL: {request.url}")
         url_result = URLService.process_url_or_video(request.url)
-        logger.info(
-            "[URLAnalysis] URLService result => success=%s source_type=%s error=%s metadata=%s",
-            url_result.get("success"),
-            url_result.get("source_type"),
-            url_result.get("error"),
-            url_result.get("metadata"),
-        )
-
-        # Create conversation if not provided
-        conversation_id = request.conversation_id
-        if not conversation_id:
-            conversation = ConversationService.create_conversation(db, user.id)
-            conversation_id = conversation.id
-            logger.info(f"[URLAnalysis] Created new conversation: {conversation_id}")
-
-        # Special handling: Google Sheets URLs should be answered via dataframe agent.
-        if url_result.get("success") and url_result.get("source_type") == "google_sheet":
-            logger.info("[URLAnalysis][SHEET_QA] Routing request to pandas dataframe agent")
-
-            # Extract user intent by removing the URL itself from the message.
-            question = (request.user_message or "").replace(request.url, "").strip()
-            used_default_overview_prompt = False
-            if not question:
-                used_default_overview_prompt = True
-                question = (
-                    "Analyze this dataset and provide a rich overview. "
-                    "Describe: (1) what this data is about and how many rows/columns it has, "
-                    "(2) the important columns in plain language (no technical dtype labels), "
-                    "(3) notable highlights such as the highest values, distributions, or outliers, "
-                    "(4) any interesting patterns or business insights you can derive. "
-                    "Be specific with actual values from the data. "
-                    "Do not output lines like 'ColumnName : str' or raw pandas dtype mappings."
-                )
-
-            dataframe_service = get_dataframe_qa_service()
-            df = dataframe_service.load_dataframe_from_google_sheet(
-                sheet_id_or_url=request.url,
-                worksheet_name="Sheet1",
-                cell_range="A1:Z1000",
-            )
-
-            # Cache dataframe for same-conversation follow-up prompts.
-            df_cache = get_dataframe_cache()
-            df_cache.store(conversation_id, df, request.url, source="google_sheet")
-            logger.info(
-                "[URLAnalysis][SHEET_QA] Cached dataframe conv_id=%s rows=%s cols=%s",
-                conversation_id,
-                len(df),
-                len(df.columns),
-            )
-
-            pandas_agent_service = get_pandas_agent_service()
-            agent_result = pandas_agent_service.query(
-                df=df,
-                question=question,
-                source="google_sheet",
-            )
-
-            if not agent_result.get("success"):
-                raise ValueError(agent_result.get("error") or "Pandas agent failed for Google Sheet")
-
-            assistant_response = agent_result.get("answer", "")
-            if used_default_overview_prompt and assistant_response:
-                # Safety cleanup for URL-only auto-analyze: remove raw dtype list lines
-                # such as "CustomerID : str" or "Amount : float64".
-                assistant_response = re.sub(
-                    r"(?im)^\s*[-*]?\s*`?([A-Za-z_][\w\s-]*)`?\s*:\s*(str|string|int|int64|float|float64|bool|boolean|object|datetime|datetime64(?:\[ns\])?)\s*$",
-                    "",
-                    assistant_response,
-                )
-                assistant_response = re.sub(r"\n{3,}", "\n\n", assistant_response).strip()
-
-            logger.info(
-                "[URLAnalysis][SHEET_QA] Answer generated len=%s rows=%s cols=%s",
-                len(assistant_response),
-                len(df),
-                len(df.columns),
-            )
-
-            ConversationService.add_message(db, conversation_id, user.id, "user", request.user_message)
-            ConversationService.add_message(db, conversation_id, user.id, "assistant", assistant_response)
-
-            return URLAnalysisResponse(
-                user_message=request.user_message,
-                assistant_response=assistant_response,
-                conversation_id=conversation_id,
-            )
         
         # Prepare message content - handle both success and failure cases
         if url_result["success"] and url_result["content"]:
             # Content was successfully extracted
-            source_type = url_result.get("source_type", "unknown")
-            message_content = (
-                "[SYSTEM INSTRUCTION]\n"
-                "The URL content has already been extracted by the backend. "
-                "You must analyze only the extracted content below and answer the user request. "
-                "Do not say that you cannot access the URL.\n\n"
-                f"[USER REQUEST]\n{request.user_message}\n\n"
-                f"[EXTRACTED_URL_SOURCE:{source_type}]\n"
-                f"{url_result['content']}"
-            )
+            message_content = f"{request.user_message}\n\n{url_result['content']}"
             logger.info(f"[URLAnalysis] ✅ Content extracted: {len(message_content)} chars")
         else:
             # No content available - send error message to LLM
@@ -1076,12 +863,13 @@ async def analyze_url(
                 message_content = f"{request.user_message}\n\n[SYSTEM NOTICE: URL Analysis Failed]\nURL: {request.url}\nError: {error_msg}\n\nPlease try another URL or provide the content directly."
             
             logger.warning(f"[URLAnalysis] Content unavailable: {error_msg}")
-
-        logger.info(
-            "[URLAnalysis] message_content length=%s preview=%s",
-            len(message_content),
-            message_content[:300].replace("\n", "\\n"),
-        )
+        
+        # Create conversation if not provided
+        conversation_id = request.conversation_id
+        if not conversation_id:
+            conversation = ConversationService.create_conversation(db, user.id)
+            conversation_id = conversation.id
+            logger.info(f"[URLAnalysis] Created new conversation: {conversation_id}")
         
         # Fetch previous conversations for context
         previous_conversations = ConversationService.get_previous_conversations(
@@ -1100,18 +888,11 @@ async def analyze_url(
             user_id=user.id,
             previous_conversations=previous_conversations,
         )
-
-        logger.info(
-            "[URLAnalysis] assistant_response length=%s preview=%s",
-            len(assistant_response or ""),
-            (assistant_response or "")[:300].replace("\n", "\\n"),
-        )
         
         logger.info(f"[URLAnalysis] ✅ Analysis complete")
         return URLAnalysisResponse(
             user_message=request.user_message,
             assistant_response=assistant_response,
-            conversation_id=conversation_id,
         )
     except HTTPException:
         raise

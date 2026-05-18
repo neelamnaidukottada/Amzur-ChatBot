@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 _ALLOWED_DIALECTS = {"sqlite", "postgresql"}
+_DIALECT_ALIASES = {"postgres": "postgresql"}
 
 
 @dataclass
@@ -44,8 +45,19 @@ class SQLQAService:
         safe_url = self._validate_database_url(database_url)
         schema_summary = self._get_schema_summary(safe_url)
 
-        sql = self._generate_sql(question=question, schema_summary=schema_summary)
-        sql = self._sanitize_sql(sql)
+        generated_sql = self._generate_sql(question=question, schema_summary=schema_summary)
+        try:
+            sql = self._sanitize_sql(generated_sql)
+        except ValueError as exc:
+            # Retry once with a stricter prompt when the model returns non-SQL text.
+            if "Only read-only SELECT queries are allowed" not in str(exc):
+                raise
+            retry_sql = self._generate_sql_retry_read_only(
+                question=question,
+                schema_summary=schema_summary,
+                previous_output=generated_sql,
+            )
+            sql = self._sanitize_sql(retry_sql)
 
         rows = self._execute_read_only_query(safe_url, sql)
         answer = self._summarize_answer(question=question, sql=sql, rows=rows)
@@ -56,17 +68,23 @@ class SQLQAService:
         if not database_url or not database_url.strip():
             raise ValueError("database_url is required")
 
+        normalized_url = database_url.strip()
+        # Accept common postgres:// form by normalizing to postgresql://.
+        if normalized_url.lower().startswith("postgres://"):
+            normalized_url = "postgresql://" + normalized_url[len("postgres://") :]
+
         try:
-            url_obj: URL = make_url(database_url.strip())
+            url_obj: URL = make_url(normalized_url)
         except Exception as exc:
             raise ValueError(f"Invalid database URL: {exc}") from exc
 
         dialect = (url_obj.drivername or "").split("+")[0]
+        dialect = _DIALECT_ALIASES.get(dialect, dialect)
         if dialect not in _ALLOWED_DIALECTS:
             allowed = ", ".join(sorted(_ALLOWED_DIALECTS))
             raise ValueError(f"Unsupported database dialect '{dialect}'. Allowed: {allowed}")
 
-        return database_url.strip()
+        return normalized_url
 
     def _get_schema_summary(self, database_url: str) -> str:
         engine = self._create_engine(database_url)
@@ -113,11 +131,41 @@ class SQLQAService:
 
         return str(sql).strip()
 
+    def _generate_sql_retry_read_only(self, question: str, schema_summary: str, previous_output: str) -> str:
+        """Retry SQL generation with stricter constraints after invalid model output."""
+        llm = get_chat_llm()
+        prompt = (
+            "Your previous output was invalid. Return a single READ-ONLY SQL query only.\n"
+            "Strict rules:\n"
+            "1) Output must start with SELECT or WITH.\n"
+            "2) Use only schema tables/columns.\n"
+            "3) Do not include any explanation, labels, markdown, or code fences.\n"
+            "4) Do not include INSERT/UPDATE/DELETE/ALTER/DROP/CREATE/TRUNCATE.\n"
+            "5) Return exactly one SQL statement.\n\n"
+            f"Schema:\n{schema_summary}\n\n"
+            f"Question: {question}\n"
+            f"Previous invalid output: {previous_output}"
+        )
+
+        response = llm.invoke(prompt)
+        sql = getattr(response, "content", "") if hasattr(response, "content") else str(response)
+        if not sql or not str(sql).strip():
+            raise RuntimeError("Model did not generate SQL on retry")
+
+        return str(sql).strip()
+
     def _sanitize_sql(self, sql: str) -> str:
         cleaned = sql.strip().strip("`")
         cleaned = re.sub(r"^```sql\s*", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"^```\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+        cleaned = re.sub(r"^(sqlquery|query|sql)\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+
+        # If model prepends explanatory text, keep SQL from first SELECT/WITH onward.
+        if not re.match(r"(?is)^\s*(select|with)\b", cleaned):
+            match = re.search(r"(?is)\b(select|with)\b.*", cleaned)
+            if match:
+                cleaned = match.group(0).strip()
 
         if ";" in cleaned:
             parts = [p.strip() for p in cleaned.split(";") if p.strip()]
@@ -149,8 +197,11 @@ class SQLQAService:
             if token in padded:
                 raise ValueError("Query contains a forbidden SQL operation")
 
-        if not re.search(r'\blimit\b', lowered):
+        if not re.search(r"\blimit\b", lowered):
             cleaned = f"{cleaned} LIMIT {self.max_rows}"
+
+        # Guard against accidental duplicated LIMIT clauses from model output.
+        cleaned = re.sub(r"(?is)\blimit\s+(\d+)\s+limit\s+\d+\b", r"LIMIT \1", cleaned)
 
         return cleaned
 

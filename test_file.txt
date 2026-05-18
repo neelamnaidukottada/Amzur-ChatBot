@@ -1,0 +1,23 @@
+This is a test text file for the Amzur Chat Bot file reading feature.
+
+The purpose of this document is to verify that the backend can successfully:
+1. Read text files
+2. Extract the content correctly
+3. Pass it to the LLM along with the user's prompt
+4. Get a response based on the file content
+
+Key features being tested:
+- File upload functionality
+- Text extraction from .txt files
+- Integration with LLM
+- Response based on file content
+
+Test Instructions:
+1. Open the chat application
+2. Click the + button (Add photos & files)
+3. Select this file (test_file.txt)
+4. Type a prompt like "What is in this file?" or "Summarize this document"
+5. Send the message
+6. The LLM should read the file content and respond accordingly
+
+If working correctly, the LLM will reference the content of this file in its response.

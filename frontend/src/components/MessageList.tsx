@@ -2,9 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import type { Message } from '../types/chat';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ErrorBoundary } from './ErrorBoundary';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
 import 'katex/dist/katex.min.css';
+
+SyntaxHighlighter.registerLanguage('sql', sql);
 
 interface MessageListProps {
   messages: Message[];
@@ -16,21 +19,24 @@ interface MessageListProps {
 // Image display component with lightbox support
 const ImageDisplay = ({ src, alt, prompt }: { src: string; alt: string; prompt?: string }) => {
   const [showFullscreen, setShowFullscreen] = useState(false);
+  const [failedToLoad, setFailedToLoad] = useState(false);
   
   return (
     <>
       <div className="my-2 rounded-lg overflow-hidden bg-white border border-gray-200">
-        <img 
-          src={src} 
-          alt={alt}
-          className="rounded-lg max-w-md w-full cursor-pointer hover:opacity-90 transition"
-          onClick={() => setShowFullscreen(true)}
-          loading="lazy"
-        />
-        {prompt && (
-          <p className="text-sm p-2 opacity-75 bg-gray-50 border-t border-gray-200">
-            <strong>Prompt:</strong> {prompt}
-          </p>
+        {!failedToLoad ? (
+          <img 
+            src={src} 
+            alt={alt}
+            className="rounded-lg max-w-md w-full cursor-pointer hover:opacity-90 transition"
+            onClick={() => setShowFullscreen(true)}
+            onError={() => setFailedToLoad(true)}
+            loading="lazy"
+          />
+        ) : (
+          <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200">
+            Image could not be loaded in the browser.
+          </div>
         )}
       </div>
       
@@ -59,65 +65,6 @@ const ImageDisplay = ({ src, alt, prompt }: { src: string; alt: string; prompt?:
       )}
     </>
   );
-};
-
-// Component to embed videos from various sources
-const VideoEmbed = ({ url }: { url: string }) => {
-  // YouTube
-  if (url.includes('youtube.com') || url.includes('youtu.be')) {
-    const videoId = url.includes('youtu.be') 
-      ? url.split('youtu.be/')[1]?.split('?')[0]
-      : url.split('v=')[1]?.split('&')[0];
-    if (videoId) {
-      return (
-        <div className="mb-2 rounded-lg overflow-hidden">
-          <iframe
-            width="100%"
-            height="400"
-            src={`https://www.youtube.com/embed/${videoId}`}
-            frameBorder="0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-            title="YouTube video"
-          />
-        </div>
-      );
-    }
-  }
-  
-  // Vimeo
-  if (url.includes('vimeo.com')) {
-    const videoId = url.split('vimeo.com/')[1]?.split('?')[0];
-    if (videoId) {
-      return (
-        <div className="mb-2 rounded-lg overflow-hidden">
-          <iframe
-            src={`https://player.vimeo.com/video/${videoId}`}
-            width="100%"
-            height="400"
-            frameBorder="0"
-            allow="autoplay; fullscreen; picture-in-picture"
-            allowFullScreen
-            title="Vimeo video"
-          />
-        </div>
-      );
-    }
-  }
-  
-  // Generic video file
-  if (url.endsWith('.mp4') || url.endsWith('.webm') || url.endsWith('.ogg')) {
-    return (
-      <div className="mb-2 rounded-lg overflow-hidden bg-black">
-        <video width="100%" height="400" controls className="rounded-lg w-full">
-          <source src={url} />
-          Your browser does not support the video tag.
-        </video>
-      </div>
-    );
-  }
-  
-  return null;
 };
 
 const normalizeCellValue = (value: unknown): string => {
@@ -231,20 +178,22 @@ export function MessageList({ messages, isLoading, onEditMessage, onRegenerateMe
         const startIndex = (currentPage - 1) * DEFAULT_TABLE_PAGE_SIZE;
         const paginatedRows = dbRows.slice(startIndex, startIndex + DEFAULT_TABLE_PAGE_SIZE);
 
+        const safeMessageContent = typeof message.content === 'string' ? message.content : '';
+
         const assistantDisplayContent = message.dbGeneratedSql
-          ? message.content
+          ? safeMessageContent
               .replace(/(^|\n)\s*SQL Used:.*$/gim, '')
               .replace(/\n{3,}/g, '\n\n')
               .trim()
-          : message.content;
+          : safeMessageContent;
         
         // Debug logging for ALL assistant messages
         if (message.sender === 'assistant') {
           console.log('[MessageList] Rendering assistant message:', {
             messageId: message.id,
-            messageContentLength: message.content.length,
-            messageContentPreview: message.content.substring(0, 100),
-            messageContentIsEmpty: message.content === '',
+            messageContentLength: safeMessageContent.length,
+            messageContentPreview: safeMessageContent.substring(0, 100),
+            messageContentIsEmpty: safeMessageContent === '',
             messageContentIsNull: message.content === null,
             messageContentIsUndefined: message.content === undefined,
             displayContentLength: assistantDisplayContent.length,

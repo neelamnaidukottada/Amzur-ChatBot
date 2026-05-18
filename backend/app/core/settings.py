@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o"
     LITELLM_EMBEDDING_MODEL: str = "text-embedding-3-large"
     IMAGE_GEN_MODEL: str = "gemini/imagen-4.0-fast-generate-001"  # Image generation model via LiteLLM proxy
+    RESEARCH_CACHE_TTL_MINUTES: int = 90
+    RESEARCH_ARXIV_MAX_RETRIES: int = 3
+    RESEARCH_ARXIV_BACKOFF_SECONDS: float = 1.0
     
     # Google Gemini
     GOOGLE_GEMINI_API_KEY: str = "AIzaSyD6rbz7oKzMMoTAyhcvbgmhcenJo9K2dw4"  # Set via environment variable (Get from https://aistudio.google.com/app/apikey)

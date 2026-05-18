@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../lib/api';
 
 interface AttachedFile {
@@ -30,6 +31,7 @@ export function InputBar({
   currentConversationId,
   onEnsureConversation,
 }: InputBarProps) {
+  const navigate = useNavigate();
   const [input, setInput] = useState('');
   const [generatingImage, setGeneratingImage] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -338,8 +340,15 @@ export function InputBar({
       console.log('Requesting image generation with prompt:', prompt);
       const result = await apiClient.generateImage(prompt);
       console.log('Image generation response:', result);
+      const imageUrl = result.url;
+      const imagePrompt = result.revised_prompt || result.prompt || prompt;
+
+      if (!imageUrl) {
+        throw new Error('No image URL found in API response');
+      }
+
       if (onImageGenerated) {
-        onImageGenerated(result.url, result.revised_prompt);
+        onImageGenerated(imageUrl, imagePrompt);
       }
       setInput('');
     } catch (error) {
@@ -443,6 +452,13 @@ export function InputBar({
           }`}
         >
           Image Generation
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/research-digest-agent')}
+          className="px-3 py-1.5 rounded-full text-sm font-medium transition bg-amber-100 text-amber-900 hover:bg-amber-200"
+        >
+          Research Digest Agent
         </button>
       </div>
 

@@ -6,4 +6,15 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          markdown_core: ['react-markdown'],
+          markdown_code: ['react-syntax-highlighter', 'react-syntax-highlighter/dist/esm/styles/prism'],
+          markdown_math: ['react-katex', 'katex'],
+        },
+      },
+    },
+  },
 })

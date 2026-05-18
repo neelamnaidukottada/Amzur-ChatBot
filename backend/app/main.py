@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.settings import settings
-from app.api import chat, auth, data
+from app.api import chat, auth, data, research
 from app.core.init_db import init_db
 
 # Try to initialize database, but don't fail if not available
@@ -35,6 +35,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(data.router)
+app.include_router(research.router)
 
 
 @app.get("/health")

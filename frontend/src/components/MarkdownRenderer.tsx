@@ -1,14 +1,32 @@
-import React, { Fragment } from 'react';
+import React from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import { InlineMath, BlockMath } from 'react-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python';
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json';
+import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
+import markup from 'react-syntax-highlighter/dist/esm/languages/prism/markup';
 import 'katex/dist/katex.min.css';
+
+SyntaxHighlighter.registerLanguage('javascript', javascript);
+SyntaxHighlighter.registerLanguage('typescript', typescript);
+SyntaxHighlighter.registerLanguage('python', python);
+SyntaxHighlighter.registerLanguage('bash', bash);
+SyntaxHighlighter.registerLanguage('json', json);
+SyntaxHighlighter.registerLanguage('sql', sql);
+SyntaxHighlighter.registerLanguage('html', markup);
+SyntaxHighlighter.registerLanguage('xml', markup);
 
 interface MarkdownRendererProps {
   content: string;
   className?: string;
 }
+
+type RenderPart = { type: 'math' | 'block-math' | 'text'; content: string };
 
 /**
  * Normalise LLM outputs that use markdown definition-list syntax.
@@ -48,8 +66,8 @@ function normalizeDefinitionLists(text: string): string {
 }
 
 // Parse content to extract math and non-math parts
-const parseContent = (text: string): Array<{ type: 'math' | 'block-math' | 'text'; content: string }> => {
-  const parts = [];
+const parseContent = (text: string): RenderPart[] => {
+  const parts: RenderPart[] = [];
   let remaining = text;
 
   // Regex patterns for both LaTeX and dollar delimiters
@@ -58,12 +76,8 @@ const parseContent = (text: string): Array<{ type: 'math' | 'block-math' | 'text
 
   // We'll process in order: first block math (both types), then inline math (both types)
   const blockMathRegex = /(\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\])/g;
-  const inlineMathDollarRegex = /\$([^\$\n]+?)\$/g;
-  const inlineMathLatexRegex = /\\\(([^\)]+?)\\\)/g;
-
-  let lastIndex = 0;
   let match;
-  const matches = [];
+  const matches: Array<{ start: number; end: number; content: string; type: 'block-math' }> = [];
 
   // Find all block math matches
   while ((match = blockMathRegex.exec(remaining)) !== null) {
@@ -97,7 +111,7 @@ const parseContent = (text: string): Array<{ type: 'math' | 'block-math' | 'text
   return parts;
 };
 
-const parseInlineMath = (text: string, parts: Array<{ type: string; content: string }>) => {
+const parseInlineMath = (text: string, parts: RenderPart[]) => {
   const combined: Array<{ pos: number; end: number; content: string; type: 'math' | 'text' }> = [];
 
   // Find all $ delimited math
@@ -147,7 +161,7 @@ const parseInlineMath = (text: string, parts: Array<{ type: string; content: str
 
 // Custom components for markdown rendering
 const markdownComponents: Components = {
-  code({ node, inline, className, children, ...props }: any) {
+  code({ node, className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
     const language = match ? match[1] : 'text';
     const childText = String(children);
@@ -264,14 +278,10 @@ const markdownComponents: Components = {
   dd: ({ node, ...props }: any) => (
     <dd className="inline ml-1 text-gray-600 after:content-['\\A'] after:whitespace-pre" {...props} />
   ),
-
-  inlineCode: ({ node, ...props }: any) => (
-    <code className="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono" {...props} />
-  ),
 };
 
 // Render a single part (text, inline math, or block math)
-const renderPart = (part: { type: string; content: string }, index: number) => {
+const renderPart = (part: RenderPart, index: number) => {
   if (part.type === 'math') {
     return (
       <span key={index} className="inline-math">
@@ -321,10 +331,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     // Normalise definition-list syntax before parsing so `: value` lines
     // don't render as disconnected blocks.
     const normalizedContent = normalizeDefinitionLists(content);
-    let parts = parseContent(normalizedContent);
+    const parts = parseContent(normalizedContent);
     
     // Merge adjacent text parts to reduce excessive spacing
-    const mergedParts: Array<{ type: string; content: string }> = [];
+    const mergedParts: RenderPart[] = [];
     for (const part of parts) {
       const lastPart = mergedParts[mergedParts.length - 1];
       if (lastPart && lastPart.type === 'text' && part.type === 'text') {

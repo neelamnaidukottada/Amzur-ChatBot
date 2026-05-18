@@ -125,28 +125,6 @@ export function ChatPage() {
     await loadConversation(conversationId);
   };
 
-  const handleDeleteConversation = async (e: React.MouseEvent, conversationId: number, folderId: string) => {
-    e.stopPropagation();
-    if (confirm('Are you sure you want to delete this conversation?')) {
-      await deleteConversation(conversationId);
-      
-      // Remove from folder
-      setFolders((prev) =>
-        prev.map((folder) =>
-          folder.id === folderId
-            ? { ...folder, conversationIds: folder.conversationIds.filter((id) => id !== conversationId) }
-            : folder
-        )
-      );
-    }
-  };
-
-  const handleStartRename = (e: React.MouseEvent, conv: any) => {
-    e.stopPropagation();
-    setRenamingId(conv.id);
-    setRenameText(conv.title);
-  };
-
   const handleSaveRename = async (e: React.MouseEvent, conversationId: number) => {
     e.stopPropagation();
     if (renameText.trim()) {
@@ -795,7 +773,7 @@ export function ChatPage() {
       <div className="flex-1 flex flex-col bg-white">
         {/* Chat Content */}
         <div className="flex-1 overflow-y-auto flex flex-col">
-          {!currentConversation || messages.length === 0 ? (
+          {messages.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center max-w-2xl w-full px-4">
                 <h2 className="text-4xl font-light text-gray-800 mb-8">

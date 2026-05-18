@@ -28,6 +28,7 @@ class User(Base):
 
     # Relationships
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
+    research_digests = relationship("ResearchDigest", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, provider={self.auth_provider})>"
@@ -47,6 +48,7 @@ class Conversation(Base):
     # Relationships
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+    research_digests = relationship("ResearchDigest", back_populates="conversation", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Conversation(id={self.id}, user_id={self.user_id})>"
@@ -68,3 +70,26 @@ class Message(Base):
 
     def __repr__(self) -> str:
         return f"<Message(id={self.id}, conversation_id={self.conversation_id}, sender={self.sender})>"
+
+
+class ResearchDigest(Base):
+    """Persisted research digest results linked to a conversation."""
+
+    __tablename__ = "research_digests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    query = Column(Text, nullable=False)
+    filters_json = Column(Text, nullable=True)
+    result_json = Column(Text, nullable=False)
+    decision = Column(String(64), nullable=False)
+    high_quality_papers_found = Column(Integer, nullable=False, default=0)
+    total_unique_papers_scanned = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    conversation = relationship("Conversation", back_populates="research_digests")
+    user = relationship("User", back_populates="research_digests")
+
+    def __repr__(self) -> str:
+        return f"<ResearchDigest(id={self.id}, conversation_id={self.conversation_id}, decision={self.decision})>"

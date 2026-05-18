@@ -4,6 +4,10 @@ import type {
   Conversation,
   ConversationSummary,
   DatabaseQuestionResponse,
+  ResearchDigestRequest,
+  ResearchDigestResult,
+  ResearchDigestHistoryResponse,
+  ResearchStreamEvent,
 } from '../types/chat';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -299,7 +303,7 @@ class ApiClient {
   /**
    * Generate an image using DALL-E
    */
-  async generateImage(prompt: string, size: string = '1024x1024'): Promise<{ url: string; revised_prompt: string; model?: string; source?: string }> {
+  async generateImage(prompt: string, size: string = '1024x1024'): Promise<{ url: string; revised_prompt: string; prompt?: string; model?: string; source?: string }> {
     try {
       console.log('[API] Generating image with prompt:', prompt);
       console.log('[API] Using Google Gemini 2.0 Flash');
@@ -307,10 +311,53 @@ class ApiClient {
         prompt,
         size,
       });
+
+      const payload = response.data as {
+        url?: string;
+        revised_prompt?: string;
+        prompt?: string;
+        model?: string;
+        source?: string;
+        data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string }>;
+      };
+
+      let normalizedUrl = payload.url;
+      if (!normalizedUrl && payload.data?.[0]?.url) {
+        normalizedUrl = payload.data[0].url;
+      }
+      if (!normalizedUrl && payload.data?.[0]?.b64_json) {
+        normalizedUrl = `data:image/png;base64,${payload.data[0].b64_json}`;
+      }
+
+      // Normalize relative/backend URLs so <img> can resolve them from frontend origin.
+      if (normalizedUrl && !normalizedUrl.startsWith('data:') && !normalizedUrl.startsWith('blob:')) {
+        if (normalizedUrl.startsWith('/')) {
+          normalizedUrl = `${API_BASE_URL}${normalizedUrl}`;
+        } else if (!/^https?:\/\//i.test(normalizedUrl)) {
+          try {
+            normalizedUrl = new URL(normalizedUrl, API_BASE_URL).toString();
+          } catch {
+            // Keep original string if URL construction fails.
+          }
+        }
+      }
+
+      if (!normalizedUrl) {
+        throw new Error('Image API returned success but no image URL was found in response payload');
+      }
+
+      const normalizedPrompt = payload.revised_prompt || payload.data?.[0]?.revised_prompt || payload.prompt || prompt;
+
       console.log('[API] ✅ Image generated successfully');
-      console.log('[API] Model:', response.data.model || 'gemini-2.0-flash');
-      console.log('[API] Response:', response.data);
-      return response.data;
+      console.log('[API] Model:', payload.model || 'gemini-2.0-flash');
+      console.log('[API] Response:', payload);
+      return {
+        url: normalizedUrl,
+        revised_prompt: normalizedPrompt,
+        prompt: payload.prompt,
+        model: payload.model,
+        source: payload.source,
+      };
     } catch (error) {
       if (error instanceof AxiosError) {
         console.error('[API] ❌ Image generation error:', error.response?.data);
@@ -462,6 +509,88 @@ class ApiClient {
       }
       throw error;
     }
+  }
+
+  /**
+   * Stream autonomous research digest events as NDJSON.
+   */
+  async streamResearchDigest(
+    request: ResearchDigestRequest,
+    onEvent: (event: ResearchStreamEvent) => void
+  ): Promise<ResearchDigestResult> {
+    const token = this.token || localStorage.getItem('auth_token');
+    const response = await fetch(`${API_BASE_URL}/api/research/digest/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(request),
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Research digest request failed (${response.status}): ${text}`);
+    }
+
+    if (!response.body) {
+      throw new Error('Streaming is not supported by this browser response.');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResult: ResearchDigestResult | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const event = JSON.parse(trimmed) as ResearchStreamEvent;
+          onEvent(event);
+          if (event.type === 'final' && event.data) {
+            finalResult = event.data as ResearchDigestResult;
+          }
+        } catch (error) {
+          console.warn('[API] Failed to parse NDJSON event line:', error, trimmed);
+        }
+      }
+    }
+
+    if (!finalResult) {
+      throw new Error('Stream completed without a final digest payload.');
+    }
+
+    return finalResult;
+  }
+
+  async getResearchDigestHistory(
+    page: number = 1,
+    pageSize: number = 10,
+    conversationId?: number
+  ): Promise<ResearchDigestHistoryResponse> {
+    const params: Record<string, number> = {
+      page,
+      page_size: pageSize,
+    };
+    if (conversationId) {
+      params.conversation_id = conversationId;
+    }
+
+    const response = await this.client.get<ResearchDigestHistoryResponse>('/api/research/digests', {
+      params,
+    });
+    return response.data;
   }
 
   /**

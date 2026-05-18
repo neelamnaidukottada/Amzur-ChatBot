@@ -407,38 +407,6 @@ async def send_message(
         )
 
 
-class ImageGenerateRequest(BaseModel):
-    prompt: str
-    size: str = "1024x1024"
-
-
-@router.post("/generate-image")
-async def generate_image(
-    request: ImageGenerateRequest,
-    user_email: str = Depends(get_current_user_email),
-):
-    """
-    Generate an image from a text prompt using Gemini Imagen via LiteLLM proxy.
-
-    Returns:
-        JSON with url, revised_prompt, model, source.
-    """
-    try:
-        logger.info(f"[Chat] 🎨 Image generation request from {user_email}: {request.prompt[:80]}")
-        image_service = get_image_service()
-        result = await image_service.generate_image(request.prompt, request.size)
-        logger.info(f"[Chat] ✅ Image generated successfully")
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[Chat] ❌ Image generation failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"error": "image_generation_error", "message": str(e)},
-        )
-
-
 @router.post("/conversations", response_model=ConversationResponse)
 async def create_conversation(
     data: ConversationCreate,
@@ -689,12 +657,24 @@ async def generate_image(
             prompt=request.prompt,
             size=request.size,
         )
+
+        revised_prompt = image_data.get("revised_prompt")
+        if not isinstance(revised_prompt, str) or not revised_prompt.strip():
+            revised_prompt = request.prompt
+
+        generated_url = image_data.get("url", "")
+        if isinstance(generated_url, str):
+            logger.info(
+                "[ImageGeneration] URL format=%s length=%s",
+                "data-url" if generated_url.startswith("data:") else "remote-url",
+                len(generated_url),
+            )
         
         logger.info(f"[ImageGeneration] ✅ Image generated successfully for user: {user.email}")
         return GenerateImageResponse(
-            url=image_data["url"],
+            url=generated_url,
             prompt=request.prompt,
-            revised_prompt=image_data["revised_prompt"],
+            revised_prompt=revised_prompt,
             model=image_data.get("model", "gemini-2.0-flash"),
             source=image_data.get("source", "google-gemini"),
         )

@@ -366,19 +366,21 @@ export function useAuthenticatedChat() {
   }, []);
 
   const addImageMessage = useCallback((imageUrl: string, prompt: string) => {
+    const safePrompt = (prompt || '').trim() || 'Generated image';
+
     const userMessage: Message = {
       id: `user-img-${Date.now()}`,
-      content: prompt,
+      content: safePrompt,
       sender: 'user',
       timestamp: new Date(),
     };
     const imageMessage: Message = {
       id: `img-${Date.now() + 1}`,
-      content: prompt,
+      content: safePrompt,
       sender: 'assistant',
       timestamp: new Date(),
       imageUrl,
-      imagePrompt: prompt,
+      imagePrompt: safePrompt,
       type: 'image',
     };
     setMessages((prev) => [...prev, userMessage, imageMessage]);

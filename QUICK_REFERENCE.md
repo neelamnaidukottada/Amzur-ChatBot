@@ -174,7 +174,33 @@ VITE_API_URL=http://localhost:8000
 | POST | `/api/chat/conversations` | Create conversation |
 | GET | `/api/chat/conversations` | List conversations |
 | GET | `/api/chat/conversations/{id}` | Get conversation |
+| PUT | `/api/chat/conversations/{id}` | Rename conversation |
 | DELETE | `/api/chat/conversations/{id}` | Delete conversation |
+| POST | `/api/chat/generate-image` | Generate image from prompt |
+| POST | `/api/chat/database-question` | Ask NL question over SQL DB |
+
+### OAuth
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/auth/google` | Login/register using Google token |
+
+### Dataframe Agent
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/data/upload` | Upload CSV/XLSX dataset |
+| POST | `/api/data/google-sheet` | Connect Google Sheet |
+| POST | `/api/data/query` | Query dataset in natural language |
+| GET | `/api/data/datasets` | List active datasets |
+| GET | `/api/data/datasets/{id}` | Get dataset details |
+| DELETE | `/api/data/datasets/{id}` | Delete dataset session |
+
+## Feature Notes (Consolidated)
+
+- Database Q&A expects read-only SQL generation and runs on `POST /api/chat/database-question`.
+- Google OAuth login is available via `POST /api/auth/google`.
+- Conversation title updates are supported via `PUT /api/chat/conversations/{id}`.
+- Image generation is available via `POST /api/chat/generate-image` and requires `GOOGLE_GEMINI_API_KEY` in backend env.
+- Dataframe agent supports file upload and Google Sheets using `/api/data/*` endpoints.
 
 ## Common Issues
 

@@ -2,9 +2,6 @@
 
 import logging
 from typing import Optional, Tuple, List
-from langchain_core.messages import HumanMessage, SystemMessage
-from app.ai.llm import get_chat_llm
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -145,34 +142,8 @@ class TicTacToeAIAgent:
     
     def __init__(self):
         """Initialize AI Agent."""
-        self.llm = get_chat_llm()
-        self.system_prompt = self._build_system_prompt()
-    
-    def _build_system_prompt(self) -> str:
-        """Build system prompt for Tic Tac Toe AI."""
-        return """You are an expert Tic Tac Toe player with the following objectives:
-
-1. Win if possible - identify and play winning moves
-2. Block opponent if they are about to win
-3. Prioritize strategic positions: center (5) > corners (1,3,7,9) > sides (2,4,6,8)
-4. Never choose an occupied cell
-5. Return ONLY one number from 1-9 representing your move
-
-Board positions:
-1 | 2 | 3
-4 | 5 | 6
-7 | 8 | 9
-
-Rules:
-- AI symbol = O
-- Human symbol = X
-- If winning move exists → play it
-- If opponent can win next turn → block it
-- Otherwise choose the best strategic move
-
-CRITICAL: Output ONLY a single number (1-9) with no explanation, no reasoning, no extra text.
-Example response format: 5
-"""
+        # Minimax implementation requires no external model dependency.
+        pass
     
     def get_ai_move(self, game: TicTacToeGame, max_retries: int = 3) -> Tuple[int, str]:
         """
@@ -186,116 +157,70 @@ Example response format: 5
             (move, error_or_status)
         """
         available_moves = game.get_available_moves()
-        
+
         if not available_moves:
             return -1, "No moves available"
-        
-        # Try to get valid move from LLM
-        for attempt in range(max_retries):
-            try:
-                # Build context
-                board_display = game.get_board_display()
-                user_message = f"""Current board state:
-{board_display}
 
-Available positions: {available_moves}
-
-Your move (1-9):"""
-                
-                messages = [
-                    SystemMessage(content=self.system_prompt),
-                    HumanMessage(content=user_message)
-                ]
-                
-                # Get LLM response
-                response = self.llm.invoke(messages)
-                move_str = response.content.strip()
-                
-                logger.info(f"LLM raw response: '{move_str}'")
-                
-                # Extract number from response (handle cases where LLM adds extra text)
-                move = self._extract_move(move_str)
-                
-                if move is None:
-                    logger.warning(f"Attempt {attempt + 1}: Could not parse move from: '{move_str}'")
-                    continue
-                
-                # Validate move
-                is_valid, error = game.is_valid_move(move)
-                
-                if not is_valid:
-                    logger.warning(f"Attempt {attempt + 1}: Invalid move {move} - {error}")
-                    # Fallback: pick best strategic move
-                    if attempt == max_retries - 1:
-                        move = self._get_fallback_move(game)
-                        logger.info(f"Using fallback move: {move}")
-                        return move, "Fallback strategic move"
-                    continue
-                
-                logger.info(f"Valid AI move: {move}")
-                return move, "success"
-            
-            except Exception as e:
-                logger.error(f"Attempt {attempt + 1}: Error getting AI move: {e}")
-                if attempt == max_retries - 1:
-                    move = self._get_fallback_move(game)
-                    logger.info(f"Using fallback move due to error: {move}")
-                    return move, f"Error: {str(e)}, using fallback"
-        
-        # Final fallback
-        move = self._get_fallback_move(game)
-        logger.warning(f"All LLM attempts failed, using fallback: {move}")
-        return move, "All LLM attempts failed, using fallback"
-    
-    def _extract_move(self, response: str) -> Optional[int]:
-        """
-        Extract move number from LLM response.
-        
-        Handles cases where LLM adds extra text.
-        """
-        # Remove whitespace
-        response = response.strip()
-        
-        # Try to find first number 1-9
-        matches = re.findall(r'\b([1-9])\b', response)
-        
-        if matches:
-            try:
-                move = int(matches[0])
-                if 1 <= move <= 9:
-                    return move
-            except ValueError:
-                pass
-        
-        # Try direct integer parse
-        try:
-            move = int(response)
-            if 1 <= move <= 9:
-                return move
-        except ValueError:
-            pass
-        
-        return None
+        # Use optimal minimax play so AI is not beatable.
+        move = self._get_optimal_move(game)
+        if move == -1:
+            return -1, "No moves available"
+        return move, "optimal_minimax"
     
     def _get_fallback_move(self, game: TicTacToeGame) -> int:
         """
-        Get strategic fallback move when LLM fails.
-        
-        Priority: center > corners > sides
+        Backward-compatible method name used by existing callers.
+
+        Returns an optimal minimax move.
         """
-        board = game.board
+        return self._get_optimal_move(game)
+
+    def _get_optimal_move(self, game: TicTacToeGame) -> int:
+        """Choose the best possible move using minimax."""
         available = game.get_available_moves()
-        
         if not available:
             return -1
-        
-        # Priority order: center, corners, sides
-        priority = [5, 1, 3, 7, 9, 2, 4, 6, 8]
-        
-        for position in priority:
-            if position in available:
-                logger.info(f"Fallback: Choosing strategic position {position}")
-                return position
-        
-        # Should never reach here
-        return available[0]
+
+        best_score = float("-inf")
+        best_move = available[0]
+
+        for move in available:
+            game.board[move - 1] = game.ai_symbol
+            score = self._minimax(game, is_ai_turn=False)
+            game.board[move - 1] = " "
+
+            if score > best_score:
+                best_score = score
+                best_move = move
+
+        logger.info(f"Optimal move selected: {best_move} (score={best_score})")
+        return best_move
+
+    def _minimax(self, game: TicTacToeGame, is_ai_turn: bool) -> int:
+        """Evaluate board state recursively from the AI perspective."""
+        winner = game.check_winner()
+        if winner == game.ai_symbol:
+            return 1
+        if winner == game.human_symbol:
+            return -1
+        if game.is_board_full():
+            return 0
+
+        available = game.get_available_moves()
+
+        if is_ai_turn:
+            best_score = float("-inf")
+            for move in available:
+                game.board[move - 1] = game.ai_symbol
+                score = self._minimax(game, is_ai_turn=False)
+                game.board[move - 1] = " "
+                best_score = max(best_score, score)
+            return int(best_score)
+
+        best_score = float("inf")
+        for move in available:
+            game.board[move - 1] = game.human_symbol
+            score = self._minimax(game, is_ai_turn=True)
+            game.board[move - 1] = " "
+            best_score = min(best_score, score)
+        return int(best_score)

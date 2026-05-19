@@ -141,21 +141,14 @@ async def make_move(game_id: str, request: MoveRequest) -> MoveResponse:
     # Get AI move with validation and fallback
     try:
         if ai is None:
-            # Use strategic fallback if LLM not available
+            # Use optimal fallback if AI agent is unavailable
             available_moves = game.get_available_moves()
             if not available_moves:
                 raise HTTPException(status_code=400, detail="No valid moves available")
-            
-            # Strategic fallback: center > corners > sides
-            priority = [5, 1, 3, 7, 9, 2, 4, 6, 8]
-            ai_move = None
-            for pos in priority:
-                if pos in available_moves:
-                    ai_move = pos
-                    break
-            if ai_move is None:
-                ai_move = available_moves[0]
-            ai_status = "strategic_fallback"
+
+            fallback_agent = TicTacToeAIAgent()
+            ai_move = fallback_agent._get_fallback_move(game)
+            ai_status = "optimal_fallback"
         else:
             ai_move, ai_status = ai.get_ai_move(game)
         

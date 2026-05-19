@@ -92,6 +92,8 @@ export function useAuthenticatedChat() {
   }, [isAuthenticated]);
 
   const loadConversations = useCallback(async () => {
+    // Skip if no token exists (e.g. during/after logout)
+    if (!localStorage.getItem('auth_token')) return;
     setError(null);
     try {
       const convos = await apiClient.getConversations();

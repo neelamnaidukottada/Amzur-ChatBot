@@ -28,36 +28,58 @@ export const TicTacToePage: React.FC = () => {
     return null;
   };
 
+  const minimax = (cells: string[], isAiTurn: boolean): number => {
+    const winner = getWinner(cells);
+    if (winner === 'O') return 1;
+    if (winner === 'X') return -1;
+    if (cells.every((c) => c !== ' ')) return 0;
+
+    const available = cells
+      .map((cell, index) => ({ cell, index }))
+      .filter((x) => x.cell === ' ')
+      .map((x) => x.index);
+
+    if (isAiTurn) {
+      let best = -Infinity;
+      for (const idx of available) {
+        const next = [...cells];
+        next[idx] = 'O';
+        best = Math.max(best, minimax(next, false));
+      }
+      return best;
+    }
+
+    let best = Infinity;
+    for (const idx of available) {
+      const next = [...cells];
+      next[idx] = 'X';
+      best = Math.min(best, minimax(next, true));
+    }
+    return best;
+  };
+
   const getStrategicAiMove = (cells: string[]): number => {
     const available = cells
       .map((cell, index) => ({ cell, index }))
       .filter((x) => x.cell === ' ')
       .map((x) => x.index);
 
-    for (const idx of available) {
-      const temp = [...cells];
-      temp[idx] = 'O';
-      if (getWinner(temp) === 'O') {
-        return idx;
-      }
-    }
+    if (available.length === 0) return -1;
+
+    let bestScore = -Infinity;
+    let bestMove = available[0];
 
     for (const idx of available) {
-      const temp = [...cells];
-      temp[idx] = 'X';
-      if (getWinner(temp) === 'X') {
-        return idx;
+      const next = [...cells];
+      next[idx] = 'O';
+      const score = minimax(next, false);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = idx;
       }
     }
 
-    const priority = [4, 0, 2, 6, 8, 1, 3, 5, 7];
-    for (const idx of priority) {
-      if (cells[idx] === ' ') {
-        return idx;
-      }
-    }
-
-    return available[0] ?? -1;
+    return bestMove;
   };
 
   // Initialize game

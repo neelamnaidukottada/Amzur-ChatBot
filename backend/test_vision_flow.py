@@ -6,6 +6,8 @@ import sys
 import base64
 from io import BytesIO
 from PIL import Image
+import pytest
+from google.api_core.exceptions import ResourceExhausted
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, '.')
@@ -16,6 +18,9 @@ from app.core.settings import settings
 
 def test_vision_flow():
     """Test that vision LLM can analyze images"""
+    if not settings.GOOGLE_GEMINI_API_KEY:
+        pytest.skip("GOOGLE_GEMINI_API_KEY is not configured")
+
     try:
         print("[*] Testing Vision LLM flow with native Gemini API...")
         
@@ -46,15 +51,19 @@ def test_vision_flow():
                 "data": image_base64
             }
         ])
+
+        assert response.text and response.text.strip(), "Empty response from vision model"
         
         print(f"[✓] Vision LLM Response: {response.text}")
         print("[✓] Vision flow test PASSED!")
         
+    except ResourceExhausted as e:
+        pytest.skip(f"Gemini quota exhausted: {e}")
     except Exception as e:
         print(f"[✗] Vision flow test FAILED: {str(e)}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
+        raise
 
 if __name__ == "__main__":
     test_vision_flow()

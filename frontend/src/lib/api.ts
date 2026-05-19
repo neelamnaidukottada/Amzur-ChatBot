@@ -10,31 +10,23 @@ import type {
   ResearchStreamEvent,
 } from '../types/chat';
 import type {
-  GameState,
-  MoveResponse,
-  NewGameResponse,
+  GameState as TicTacToeGameState,
+  MoveResponse as TicTacToeMoveResponse,
+  NewGameResponse as TicTacToeNewGameResponse,
 } from '../types/tictactoe';
 
-const CHAT_API_BASE_URL = import.meta.env.VITE_CHAT_API_URL || 'http://127.0.0.1:8000';
-const GAME_API_BASE_URL = import.meta.env.VITE_GAME_API_URL || CHAT_API_BASE_URL;
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-console.log('[API] Chat backend:', CHAT_API_BASE_URL);
-console.log('[API] Game backend:', GAME_API_BASE_URL);
+console.log('[API] Connecting to backend at:', API_BASE_URL);
 
 class ApiClient {
   private client: AxiosInstance;
-  private gameClient: AxiosInstance;
   private token: string | null = null;
+  private isLoggingOut = false;
 
   constructor() {
     this.client = axios.create({
-      baseURL: CHAT_API_BASE_URL,
-      withCredentials: true,
-      timeout: 30000,
-    });
-
-    this.gameClient = axios.create({
-      baseURL: GAME_API_BASE_URL,
+      baseURL: API_BASE_URL,
       withCredentials: true,
       timeout: 30000,
     });
@@ -50,39 +42,6 @@ class ApiClient {
       return config;
     });
 
-    this.gameClient.interceptors.request.use((config) => {
-      if (this.token) {
-        config.headers.Authorization = `Bearer ${this.token}`;
-      }
-      return config;
-    });
-
-    // Response interceptor for game client with better error handling
-    this.gameClient.interceptors.response.use(
-      (response) => {
-        console.log('[API] Game Response received:', response.status, response.config.url);
-        return response;
-      },
-      (error: AxiosError) => {
-        console.error('[API] Game Error Response:', {
-          status: error.response?.status,
-          url: error.config?.url,
-          data: error.response?.data,
-        });
-
-        if (error.response) {
-          console.error('[API] Game server error:', error.response.status, error.response.data);
-        } else if (error.request) {
-          console.error('[API] ❌ No response from game backend. Is backend running on ' + GAME_API_BASE_URL + '?');
-          console.error('[API] Frontend URL:', window.location.href);
-          console.error('[API] Expected backend:', GAME_API_BASE_URL);
-        } else {
-          console.error('[API] Game request error:', error.message);
-        }
-        return Promise.reject(error);
-      }
-    );
-
     // Response interceptor for better error handling
     this.client.interceptors.response.use(
       (response) => {
@@ -90,6 +49,11 @@ class ApiClient {
         return response;
       },
       (error: AxiosError) => {
+        // Suppress all error logging and redirects during intentional logout
+        if (this.isLoggingOut) {
+          return Promise.reject(error);
+        }
+
         console.error('[API] Error Response:', {
           status: error.response?.status,
           url: error.config?.url,
@@ -109,7 +73,7 @@ class ApiClient {
         if (error.response) {
           console.error('[API] Server error:', error.response.status, error.response.data);
         } else if (error.request) {
-          console.error('[API] No response from server. Is chat backend running on ' + CHAT_API_BASE_URL + '?');
+          console.error('[API] No response from server. Is backend running on ' + API_BASE_URL + '?');
         } else {
           console.error('[API] Request error:', error.message);
         }
@@ -173,6 +137,7 @@ class ApiClient {
    * Logout user
    */
   logout() {
+    this.isLoggingOut = true;
     this.setToken(null);
   }
 
@@ -228,7 +193,7 @@ class ApiClient {
       if (error instanceof AxiosError) {
         if (!error.response) {
           throw new Error(
-            `Cannot connect to backend at ${CHAT_API_BASE_URL}. Make sure the chat backend is running.`
+            `Cannot connect to backend at ${API_BASE_URL}. Make sure the backend is running on port 8000.`
           );
         }
         throw new Error(error.response?.data?.detail?.message || 'Failed to get response from AI');
@@ -258,7 +223,7 @@ class ApiClient {
       if (error instanceof AxiosError) {
         if (!error.response) {
           throw new Error(
-            `Cannot connect to backend at ${CHAT_API_BASE_URL}. Make sure the chat backend is running.`
+            `Cannot connect to backend at ${API_BASE_URL}. Make sure the backend is running on port 8000.`
           );
         }
         console.error('[API] Server response error:', error.response?.data);
@@ -379,10 +344,10 @@ class ApiClient {
       // Normalize relative/backend URLs so <img> can resolve them from frontend origin.
       if (normalizedUrl && !normalizedUrl.startsWith('data:') && !normalizedUrl.startsWith('blob:')) {
         if (normalizedUrl.startsWith('/')) {
-          normalizedUrl = `${CHAT_API_BASE_URL}${normalizedUrl}`;
+          normalizedUrl = `${API_BASE_URL}${normalizedUrl}`;
         } else if (!/^https?:\/\//i.test(normalizedUrl)) {
           try {
-            normalizedUrl = new URL(normalizedUrl, CHAT_API_BASE_URL).toString();
+            normalizedUrl = new URL(normalizedUrl, API_BASE_URL).toString();
           } catch {
             // Keep original string if URL construction fails.
           }
@@ -566,7 +531,7 @@ class ApiClient {
     onEvent: (event: ResearchStreamEvent) => void
   ): Promise<ResearchDigestResult> {
     const token = this.token || localStorage.getItem('auth_token');
-    const response = await fetch(`${CHAT_API_BASE_URL}/api/research/digest/stream`, {
+    const response = await fetch(`${API_BASE_URL}/api/research/digest/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -641,109 +606,46 @@ class ApiClient {
   }
 
   /**
+   * Create a new Tic Tac Toe game.
+   */
+  async createTicTacToeGame(): Promise<TicTacToeNewGameResponse> {
+    const response = await this.client.post<TicTacToeNewGameResponse>('/api/games/tictactoe/new');
+    return response.data;
+  }
+
+  /**
+   * Get current Tic Tac Toe game state.
+   */
+  async getTicTacToeState(gameId: string): Promise<TicTacToeGameState> {
+    const response = await this.client.get<TicTacToeGameState>(`/api/games/tictactoe/${gameId}/state`);
+    return response.data;
+  }
+
+  /**
+   * Make a move in Tic Tac Toe.
+   */
+  async makeMove(gameId: string, position: number): Promise<TicTacToeMoveResponse> {
+    const response = await this.client.post<TicTacToeMoveResponse>(`/api/games/tictactoe/${gameId}/move`, {
+      game_id: gameId,
+      position,
+    });
+    return response.data;
+  }
+
+  /**
+   * Reset Tic Tac Toe game.
+   */
+  async resetTicTacToeGame(gameId: string): Promise<{ message: string; board: string[]; available_moves: number[] }> {
+    const response = await this.client.post<{ message: string; board: string[]; available_moves: number[] }>(`/api/games/tictactoe/${gameId}/reset`);
+    return response.data;
+  }
+
+  /**
    * Health check endpoint
    */
   async healthCheck(): Promise<{ status: string }> {
     const response = await this.client.get<{ status: string }>('/health');
     return response.data;
-  }
-
-  // ==================== TIC TAC TOE GAME ENDPOINTS ====================
-
-  /**
-   * Create a new Tic Tac Toe game
-   */
-  async createTicTacToeGame(): Promise<NewGameResponse> {
-    try {
-      console.log('[API] Creating new Tic Tac Toe game');
-      const response = await this.gameClient.post<NewGameResponse>('/api/games/tictactoe/new');
-      console.log('[API] Game created:', response.data.game_id);
-      return response.data;
-    } catch (error) {
-      if (error instanceof AxiosError) {
-        const errorMsg = error.response?.data?.detail || 'Failed to create game';
-        throw new Error(errorMsg);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Get current game state
-   */
-  async getTicTacToeGameState(gameId: string): Promise<GameState> {
-    try {
-      const response = await this.gameClient.get<GameState>(`/api/games/tictactoe/${gameId}/state`);
-      return response.data;
-    } catch (error) {
-      if (error instanceof AxiosError) {
-        const errorMsg = error.response?.data?.detail || 'Failed to get game state';
-        throw new Error(errorMsg);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Make a move in Tic Tac Toe
-   * 
-   * Backend validates:
-   * - Move is 1-9 ✓
-   * - Cell is empty ✓
-   * - AI move is valid ✓
-   */
-  async makeMove(gameId: string, position: number): Promise<MoveResponse> {
-    try {
-      console.log(`[API] Making move at position ${position} in game ${gameId}`);
-      const response = await this.gameClient.post<MoveResponse>(`/api/games/tictactoe/${gameId}/move`, {
-        game_id: gameId,
-        position,
-      });
-      console.log('[API] Move successful:', {
-        human: response.data.human_move,
-        ai: response.data.ai_move,
-        status: response.data.status,
-      });
-      return response.data;
-    } catch (error) {
-      if (error instanceof AxiosError) {
-        const errorMsg = error.response?.data?.detail || 'Failed to make move';
-        throw new Error(errorMsg);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Reset the game
-   */
-  async resetTicTacToeGame(gameId: string): Promise<{ message: string; board: string[] }> {
-    try {
-      const response = await this.gameClient.post(`/api/games/tictactoe/${gameId}/reset`);
-      return response.data;
-    } catch (error) {
-      if (error instanceof AxiosError) {
-        const errorMsg = error.response?.data?.detail || 'Failed to reset game';
-        throw new Error(errorMsg);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Delete a game
-   */
-  async deleteTicTacToeGame(gameId: string): Promise<{ message: string }> {
-    try {
-      const response = await this.gameClient.delete(`/api/games/tictactoe/${gameId}`);
-      return response.data;
-    } catch (error) {
-      if (error instanceof AxiosError) {
-        const errorMsg = error.response?.data?.detail || 'Failed to delete game';
-        throw new Error(errorMsg);
-      }
-      throw error;
-    }
   }
 }
 

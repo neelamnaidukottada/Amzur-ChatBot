@@ -17,7 +17,7 @@ interface MessageListProps {
 }
 
 // Image display component with lightbox support
-const ImageDisplay = ({ src, alt, prompt }: { src: string; alt: string; prompt?: string }) => {
+const ImageDisplay = ({ src, alt }: { src: string; alt: string }) => {
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [failedToLoad, setFailedToLoad] = useState(false);
   
@@ -257,7 +257,6 @@ export function MessageList({ messages, isLoading, onEditMessage, onRegenerateMe
                     <ImageDisplay 
                       src={message.imageUrl} 
                       alt={message.imagePrompt || 'Generated image'}
-                      prompt={message.imagePrompt}
                     />
                   </div>
                 ) : message.sender === 'assistant' ? (

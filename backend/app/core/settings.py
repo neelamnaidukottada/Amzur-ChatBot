@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     RESEARCH_ARXIV_MIN_REQUEST_INTERVAL_SECONDS: float = 3.5
     RESEARCH_ARXIV_TIMEOUT_SECONDS: float = 30.0
     RESEARCH_ARXIV_USER_AGENT: str = "amzur-research-digest/1.0 (mailto:support@example.com)"
+    RESEARCH_MCP_SERVER_COMMAND: str = ""
+    RESEARCH_MCP_SERVER_SCRIPT: str = str(BASE_DIR.parent / "mcp_server" / "server.py")
+    RESEARCH_MCP_SERVER_CWD: str = str(BASE_DIR.parent)
+    RESEARCH_MCP_TOOL_TIMEOUT_SECONDS: float = 45.0
+    RESEARCH_MCP_LOG_LEVEL: str = "INFO"
     
     # Google Gemini
     GOOGLE_GEMINI_API_KEY: str = "AIzaSyD6rbz7oKzMMoTAyhcvbgmhcenJo9K2dw4"  # Set via environment variable (Get from https://aistudio.google.com/app/apikey)

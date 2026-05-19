@@ -9,15 +9,12 @@ from typing import Any, AsyncGenerator, Dict, List
 import json
 import logging
 import math
-import random
 import re
-import xml.etree.ElementTree as ET
-
-import httpx
 from openai import OpenAI
 
 from app.ai.llm import get_chat_llm
 from app.core.settings import settings
+from app.services.mcp_client import get_mcp_client
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +22,6 @@ logger = logging.getLogger(__name__)
 class ResearchDigestService:
     """Runs autonomous multi-paper research digest workflow."""
 
-    ARXIV_API_URL = "https://export.arxiv.org/api/query"
     MIN_HIGH_QUALITY_PAPERS = 5
 
     def __init__(self) -> None:
@@ -34,8 +30,7 @@ class ResearchDigestService:
             api_key=settings.LITELLM_API_KEY,
             base_url=settings.LITELLM_PROXY_URL,
         )
-        self._arxiv_lock = asyncio.Lock()
-        self._last_arxiv_request_monotonic = 0.0
+        self.mcp_client = get_mcp_client()
 
     async def generate_digest_events(
         self,
@@ -220,89 +215,19 @@ class ResearchDigestService:
         date_to: date | None,
     ) -> List[Dict[str, Any]]:
         search_query = self._build_arxiv_search_query(query=query, categories=categories)
-        params = {
-            "search_query": search_query,
-            "start": start,
-            "max_results": max_results,
-            "sortBy": "relevance",
-            "sortOrder": "descending",
-        }
-        headers = {
-            "User-Agent": settings.RESEARCH_ARXIV_USER_AGENT,
-            "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8",
-        }
-
-        response = None
-        max_retries = max(settings.RESEARCH_ARXIV_MAX_RETRIES, 1)
-        backoff = max(settings.RESEARCH_ARXIV_BACKOFF_SECONDS, 0.1)
-        min_interval = max(settings.RESEARCH_ARXIV_MIN_REQUEST_INTERVAL_SECONDS, 0.0)
-        timeout_seconds = max(settings.RESEARCH_ARXIV_TIMEOUT_SECONDS, 5.0)
-
-        for attempt in range(max_retries):
-            try:
-                async with self._arxiv_lock:
-                    now = asyncio.get_running_loop().time()
-                    wait_for = (self._last_arxiv_request_monotonic + min_interval) - now
-                    if wait_for > 0:
-                        await asyncio.sleep(wait_for)
-
-                    async with httpx.AsyncClient(timeout=timeout_seconds, headers=headers) as client:
-                        response = await client.get(self.ARXIV_API_URL, params=params)
-
-                    self._last_arxiv_request_monotonic = asyncio.get_running_loop().time()
-                    response.raise_for_status()
-                break
-            except httpx.HTTPStatusError as exc:
-                status_code = exc.response.status_code if exc.response is not None else None
-                is_rate_limited = status_code == 429
-                if attempt == max_retries - 1:
-                    if is_rate_limited:
-                        logger.warning(
-                            "[ResearchDigest] arXiv rate limit persisted after %s attempts. Returning empty result for this round.",
-                            max_retries,
-                        )
-                        return []
-                    raise
-
-                retry_after_header = ""
-                if exc.response is not None:
-                    retry_after_header = exc.response.headers.get("Retry-After", "").strip()
-
-                retry_after_seconds = 0.0
-                if retry_after_header:
-                    try:
-                        retry_after_seconds = float(retry_after_header)
-                    except Exception:
-                        retry_after_seconds = 0.0
-
-                delay = max(retry_after_seconds, backoff * (2 ** attempt)) + random.uniform(0.0, 0.5)
-                logger.warning(
-                    "[ResearchDigest] arXiv HTTP error (attempt %s/%s, status=%s): %s. Retrying in %.2fs",
-                    attempt + 1,
-                    max_retries,
-                    status_code,
-                    str(exc),
-                    delay,
-                )
-                await asyncio.sleep(delay)
-            except (httpx.HTTPError, httpx.TimeoutException) as exc:
-                if attempt == max_retries - 1:
-                    raise
-                delay = backoff * (2 ** attempt) + random.uniform(0.0, 0.3)
-                logger.warning(
-                    "[ResearchDigest] arXiv request failed (attempt %s/%s): %s. Retrying in %.2fs",
-                    attempt + 1,
-                    max_retries,
-                    str(exc),
-                    delay,
-                )
-                await asyncio.sleep(delay)
-
-        if response is None:
+        cumulative_results = await self.mcp_client.call_tool(
+            "search_arxiv",
+            {
+                "query": search_query,
+                "max_results": start + max_results,
+            },
+        )
+        if not isinstance(cumulative_results, list):
             return []
 
-        parsed = self._parse_arxiv_feed(response.text)
-        return self._apply_constraints(parsed, categories=categories, date_from=date_from, date_to=date_to)
+        papers = self._normalize_mcp_papers(cumulative_results)
+        paged_papers = papers[start:start + max_results]
+        return self._apply_constraints(paged_papers, categories=categories, date_from=date_from, date_to=date_to)
 
     @staticmethod
     def _build_arxiv_search_query(query: str, categories: List[str]) -> str:
@@ -350,23 +275,22 @@ class ResearchDigestService:
 
         return filtered
 
-    def _parse_arxiv_feed(self, xml_text: str) -> List[Dict[str, Any]]:
-        ns = {
-            "atom": "http://www.w3.org/2005/Atom",
-            "arxiv": "http://arxiv.org/schemas/atom",
-        }
-        root = ET.fromstring(xml_text)
+    def _normalize_mcp_papers(self, payload: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         papers: List[Dict[str, Any]] = []
 
-        for entry in root.findall("atom:entry", ns):
-            paper_id = (entry.findtext("atom:id", default="", namespaces=ns) or "").strip()
-            title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip()
-            summary = (entry.findtext("atom:summary", default="", namespaces=ns) or "").strip()
-            published = (entry.findtext("atom:published", default="", namespaces=ns) or "").strip()
-            authors = [a.findtext("atom:name", default="", namespaces=ns) for a in entry.findall("atom:author", ns)]
-            categories = [c.attrib.get("term", "") for c in entry.findall("atom:category", ns)]
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
 
-            if not paper_id or not title:
+            url = str(item.get("url") or "").strip()
+            title = str(item.get("title") or "").strip()
+            summary = str(item.get("summary") or "").strip()
+            published = str(item.get("published") or "").strip()
+            authors = item.get("authors") if isinstance(item.get("authors"), list) else []
+            categories = item.get("categories") if isinstance(item.get("categories"), list) else []
+            paper_id = str(item.get("id") or url).strip()
+
+            if not paper_id or not title or not url:
                 continue
 
             papers.append(
@@ -375,9 +299,9 @@ class ResearchDigestService:
                     "title": re.sub(r"\s+", " ", title),
                     "summary": re.sub(r"\s+", " ", summary),
                     "published": published,
-                    "authors": [a for a in authors if a],
-                    "categories": [c for c in categories if c],
-                    "url": paper_id,
+                    "authors": [str(a).strip() for a in authors if str(a).strip()],
+                    "categories": [str(c).strip() for c in categories if str(c).strip()],
+                    "url": url,
                 }
             )
 

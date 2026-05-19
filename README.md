@@ -18,6 +18,71 @@ A conversational AI chatbot built with authentication, chat history persistence,
 - ✅ **Modern UI** - Responsive design with sidebar navigation
 - ✅ **Natural Language SQL (Project 8)** - Connect a SQL DB and ask questions using `/db <database-url> | <question>`
 
+## Projects Documentation Index (1-12)
+
+This repository contains project-wise implementation guides and summaries. Use this section as the main entry point for all project documentation.
+
+### Project 1
+
+- Documentation: Not yet added in this repository.
+
+### Project 2
+
+- Summary: [PROJECT_2_SUMMARY.md](PROJECT_2_SUMMARY.md)
+
+### Project 3
+
+- Setup: [PROJECT_3_SETUP.md](PROJECT_3_SETUP.md)
+- Quick Start: [PROJECT_3_QUICK_START.md](PROJECT_3_QUICK_START.md)
+- Summary: [PROJECT_3_SUMMARY.md](PROJECT_3_SUMMARY.md)
+
+### Project 4
+
+- Documentation: Not yet added in this repository.
+
+### Project 5
+
+- Documentation: Not yet added in this repository.
+
+### Project 6
+
+- Documentation: Not yet added in this repository.
+
+### Project 7
+
+- Documentation: Not yet added in this repository.
+
+### Project 8
+
+- Setup: [PROJECT_8_SETUP.md](PROJECT_8_SETUP.md)
+
+### Project 9
+
+- Documentation: Not yet added in this repository.
+
+### Project 10
+
+- Documentation: Not yet added in this repository.
+
+### Project 11
+
+- Overview: [PROJECT_11_README.md](PROJECT_11_README.md)
+- Quick Start: [PROJECT_11_QUICK_START.md](PROJECT_11_QUICK_START.md)
+- Technical Guide: [PROJECT_11_TICTACTOE_GUIDE.md](PROJECT_11_TICTACTOE_GUIDE.md)
+- Implementation Checklist: [PROJECT_11_IMPLEMENTATION_CHECKLIST.md](PROJECT_11_IMPLEMENTATION_CHECKLIST.md)
+- Implementation Summary: [PROJECT_11_IMPLEMENTATION_SUMMARY.md](PROJECT_11_IMPLEMENTATION_SUMMARY.md)
+- Expert Guide: [PROJECT_11_EXPERT_GUIDE.md](PROJECT_11_EXPERT_GUIDE.md)
+
+### Project 12
+
+Project 12 introduces MCP integration for research evidence retrieval while preserving existing frontend, API contracts, streaming flow, and agent behavior.
+
+- Overview: [PROJECT_12_README.md](PROJECT_12_README.md)
+- Quick Start: [PROJECT_12_QUICK_START.md](PROJECT_12_QUICK_START.md)
+- MCP Integration Guide: [PROJECT_12_MCP_INTEGRATION_GUIDE.md](PROJECT_12_MCP_INTEGRATION_GUIDE.md)
+- Implementation Checklist: [PROJECT_12_IMPLEMENTATION_CHECKLIST.md](PROJECT_12_IMPLEMENTATION_CHECKLIST.md)
+- Implementation Summary: [PROJECT_12_IMPLEMENTATION_SUMMARY.md](PROJECT_12_IMPLEMENTATION_SUMMARY.md)
+
 ## Prerequisites
 
 - **Python 3.9+** (Backend)

@@ -1,11 +1,17 @@
-from pydantic_settings import BaseSettings
+from pathlib import Path
+
 from pydantic import ConfigDict
+from pydantic_settings import BaseSettings
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+ENV_FILE = BASE_DIR / ".env"
 
 
 class Settings(BaseSettings):
     """Application configuration from environment variables."""
 
-    model_config = ConfigDict(extra='ignore', env_file='.env', case_sensitive=True)
+    model_config = ConfigDict(extra='ignore', env_file=str(ENV_FILE), case_sensitive=True)
 
     # App
     APP_NAME: str = "amzur-simple-chatbot"
@@ -20,6 +26,9 @@ class Settings(BaseSettings):
     RESEARCH_CACHE_TTL_MINUTES: int = 90
     RESEARCH_ARXIV_MAX_RETRIES: int = 3
     RESEARCH_ARXIV_BACKOFF_SECONDS: float = 1.0
+    RESEARCH_ARXIV_MIN_REQUEST_INTERVAL_SECONDS: float = 3.5
+    RESEARCH_ARXIV_TIMEOUT_SECONDS: float = 30.0
+    RESEARCH_ARXIV_USER_AGENT: str = "amzur-research-digest/1.0 (mailto:support@example.com)"
     
     # Google Gemini
     GOOGLE_GEMINI_API_KEY: str = "AIzaSyD6rbz7oKzMMoTAyhcvbgmhcenJo9K2dw4"  # Set via environment variable (Get from https://aistudio.google.com/app/apikey)

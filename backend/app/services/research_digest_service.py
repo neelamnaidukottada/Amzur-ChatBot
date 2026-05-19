@@ -34,6 +34,8 @@ class ResearchDigestService:
             api_key=settings.LITELLM_API_KEY,
             base_url=settings.LITELLM_PROXY_URL,
         )
+        self._arxiv_lock = asyncio.Lock()
+        self._last_arxiv_request_monotonic = 0.0
 
     async def generate_digest_events(
         self,
@@ -225,17 +227,64 @@ class ResearchDigestService:
             "sortBy": "relevance",
             "sortOrder": "descending",
         }
+        headers = {
+            "User-Agent": settings.RESEARCH_ARXIV_USER_AGENT,
+            "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
 
         response = None
         max_retries = max(settings.RESEARCH_ARXIV_MAX_RETRIES, 1)
         backoff = max(settings.RESEARCH_ARXIV_BACKOFF_SECONDS, 0.1)
+        min_interval = max(settings.RESEARCH_ARXIV_MIN_REQUEST_INTERVAL_SECONDS, 0.0)
+        timeout_seconds = max(settings.RESEARCH_ARXIV_TIMEOUT_SECONDS, 5.0)
 
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.get(self.ARXIV_API_URL, params=params)
+                async with self._arxiv_lock:
+                    now = asyncio.get_running_loop().time()
+                    wait_for = (self._last_arxiv_request_monotonic + min_interval) - now
+                    if wait_for > 0:
+                        await asyncio.sleep(wait_for)
+
+                    async with httpx.AsyncClient(timeout=timeout_seconds, headers=headers) as client:
+                        response = await client.get(self.ARXIV_API_URL, params=params)
+
+                    self._last_arxiv_request_monotonic = asyncio.get_running_loop().time()
                     response.raise_for_status()
                 break
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code if exc.response is not None else None
+                is_rate_limited = status_code == 429
+                if attempt == max_retries - 1:
+                    if is_rate_limited:
+                        logger.warning(
+                            "[ResearchDigest] arXiv rate limit persisted after %s attempts. Returning empty result for this round.",
+                            max_retries,
+                        )
+                        return []
+                    raise
+
+                retry_after_header = ""
+                if exc.response is not None:
+                    retry_after_header = exc.response.headers.get("Retry-After", "").strip()
+
+                retry_after_seconds = 0.0
+                if retry_after_header:
+                    try:
+                        retry_after_seconds = float(retry_after_header)
+                    except Exception:
+                        retry_after_seconds = 0.0
+
+                delay = max(retry_after_seconds, backoff * (2 ** attempt)) + random.uniform(0.0, 0.5)
+                logger.warning(
+                    "[ResearchDigest] arXiv HTTP error (attempt %s/%s, status=%s): %s. Retrying in %.2fs",
+                    attempt + 1,
+                    max_retries,
+                    status_code,
+                    str(exc),
+                    delay,
+                )
+                await asyncio.sleep(delay)
             except (httpx.HTTPError, httpx.TimeoutException) as exc:
                 if attempt == max_retries - 1:
                     raise

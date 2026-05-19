@@ -9,12 +9,6 @@ export function Project10Page() {
 
   const [query, setQuery] = useState('');
   const [categories, setCategories] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [batchSize, setBatchSize] = useState(10);
-  const [maxRounds, setMaxRounds] = useState(3);
-  const [minRelevance, setMinRelevance] = useState(0.7);
-  const [minQuality, setMinQuality] = useState(0.68);
   const [conversationId, setConversationId] = useState<number | undefined>(undefined);
 
   const [events, setEvents] = useState<string[]>([]);
@@ -73,16 +67,10 @@ export function Project10Page() {
         {
           query: normalized,
           conversation_id: conversationId,
-          batch_size: batchSize,
-          max_rounds: maxRounds,
           categories: categories
             .split(',')
             .map((c) => c.trim())
             .filter(Boolean),
-          date_from: dateFrom || undefined,
-          date_to: dateTo || undefined,
-          min_relevance_score: minRelevance,
-          min_quality_score: minQuality,
         },
         (event: ResearchStreamEvent) => {
           if (event.type === 'status') {
@@ -125,12 +113,13 @@ export function Project10Page() {
     }
   };
 
-  const modeButton = (label: string, onClick: () => void, active = false, palette: 'dark' | 'blue' | 'green' | 'amber' = 'dark') => {
+  const modeButton = (label: string, onClick: () => void, active = false, palette: 'dark' | 'blue' | 'green' | 'amber' | 'purple' = 'dark') => {
     const classes: Record<typeof palette, string> = {
       dark: active ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300',
       blue: active ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800 hover:bg-blue-200',
       green: active ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200',
       amber: active ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-900 hover:bg-amber-200',
+      purple: active ? 'bg-purple-700 text-white' : 'bg-purple-100 text-purple-900 hover:bg-purple-200',
     };
 
     return (
@@ -152,6 +141,7 @@ export function Project10Page() {
           {modeButton('Database Chat', () => navigate('/'), false, 'blue')}
           {modeButton('Image Generation', () => navigate('/'), false, 'green')}
           {modeButton('Research Digest Agent', () => navigate('/research-digest-agent'), true, 'amber')}
+          {modeButton('🎮 Tic Tac Toe', () => navigate('/tictactoe'), false, 'purple')}
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
@@ -175,62 +165,10 @@ export function Project10Page() {
               placeholder="Categories (comma-separated, e.g. cs.AI, cs.CL)"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
             />
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              value={batchSize}
-              min={5}
-              max={25}
-              onChange={(e) => setBatchSize(Number(e.target.value || 10))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Batch size"
-            />
-            <input
-              type="number"
-              value={maxRounds}
-              min={1}
-              max={6}
-              onChange={(e) => setMaxRounds(Number(e.target.value || 3))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Max rounds"
-            />
-            <input
-              type="number"
-              step={0.01}
-              min={0}
-              max={1}
-              value={minRelevance}
-              onChange={(e) => setMinRelevance(Number(e.target.value || 0.7))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Min relevance score"
-            />
-            <input
-              type="number"
-              step={0.01}
-              min={0}
-              max={1}
-              value={minQuality}
-              onChange={(e) => setMinQuality(Number(e.target.value || 0.68))}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Min quality score"
-            />
           </div>
 
           <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-600">
-              Conversation ID: {conversationId ?? 'new conversation will be created'}
-            </p>
+            <span />
             <button
               onClick={runDigest}
               disabled={running || !query.trim()}

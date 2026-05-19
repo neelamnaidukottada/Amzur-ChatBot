@@ -460,6 +460,13 @@ export function InputBar({
         >
           Research Digest Agent
         </button>
+        <button
+          type="button"
+          onClick={() => navigate('/tictactoe')}
+          className="px-3 py-1.5 rounded-full text-sm font-medium transition bg-purple-100 text-purple-900 hover:bg-purple-200"
+        >
+          🎮 Tic Tac Toe
+        </button>
       </div>
 
       {/* Attached Files Display */}

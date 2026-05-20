@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -186,13 +187,42 @@ async def stream_research_digest(
 
         except Exception as exc:
             logger.error("[ResearchDigest] Stream failed: %s", str(exc), exc_info=True)
-            error_event = {
-                "type": "error",
-                "stage": "failed",
-                "message": "Research digest generation failed.",
-                "data": {"error": str(exc)},
+            error_message = str(exc) if str(exc) else "Unknown error occurred"
+            error_payload = {
+                "query": request.query,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "decision": "error",
+                "reason": f"Research digest generation failed: {error_message}",
+                "rounds_completed": 0,
+                "min_required_high_quality_papers": 5,  # MIN_HIGH_QUALITY_PAPERS
+                "high_quality_papers_found": 0,
+                "total_unique_papers_scanned": 0,
+                "papers": [],
+                "keyword_clusters": [],
+                "consolidated_research_digest": "",
+                "trends": [],
+                "conflicting_ideas": [],
+                "next_action": "Please try again or adjust your search parameters.",
+                "rendered_digest_text": f"Error: {error_message}",
+                "error": error_message,
+                "conversation_id": conversation_id,
             }
-            yield _to_ndjson_line(error_event)
+            yield _to_ndjson_line(
+                {
+                    "type": "error",
+                    "stage": "failed",
+                    "message": error_message,
+                    "data": {"error": error_message},
+                }
+            )
+            # Always send a final event so the frontend doesn't hang
+            yield _to_ndjson_line(
+                {
+                    "type": "final",
+                    "stage": "error",
+                    "data": error_payload,
+                }
+            )
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 

@@ -18,10 +18,30 @@ logger = logging.getLogger(__name__)
 server = FastMCP("research-digest-mcp")
 
 
-@server.tool(name="search_arxiv", description="Search arXiv and return normalized paper metadata.")
+@server.tool(description="Search arXiv and return normalized paper metadata.")
 async def search_arxiv(query: str, max_results: int = 10) -> list[dict[str, Any]]:
-    logger.info("[MCPServer] search_arxiv invoked with max_results=%s", max_results)
-    return await search_arxiv_impl(query=query, max_results=max_results)
+    """Search arXiv papers.
+    
+    Args:
+        query: The search query to use for arXiv
+        max_results: Maximum number of results to return (default: 10)
+    
+    Returns:
+        List of paper dictionaries with normalized metadata
+    """
+    logger.info(
+        "[MCPServer] search_arxiv invoked with query='%s', max_results=%s (type=%s)",
+        query,
+        max_results,
+        type(max_results).__name__
+    )
+    try:
+        result = await search_arxiv_impl(query=query, max_results=max_results)
+        logger.info("[MCPServer] search_arxiv returning %d papers", len(result))
+        return result
+    except Exception as exc:
+        logger.exception("[MCPServer] search_arxiv failed with exception: %s", exc)
+        raise
 
 
 if __name__ == "__main__":

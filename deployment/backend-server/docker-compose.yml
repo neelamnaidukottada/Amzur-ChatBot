@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://chatbot_user:chatbot_password@postgres:5432/chatbot_db
+      - LITELLM_API_KEY=your-api-key
+      - GOOGLE_GEMINI_API_KEY=your-gemini-key
+      - SECRET_KEY=your-secret-key-change-in-production
+      - ENVIRONMENT=production
+    volumes:
+      - ./chroma_db:/app/chroma_db
+    depends_on:
+      - postgres
+    networks:
+      - chatbot-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=chatbot_user
+      - POSTGRES_PASSWORD=chatbot_password
+      - POSTGRES_DB=chatbot_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - chatbot-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  chatbot-network:
+    driver: bridge

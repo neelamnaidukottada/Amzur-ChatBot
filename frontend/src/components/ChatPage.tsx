@@ -120,7 +120,7 @@ export function ChatPage() {
     
     // If in draft mode, create the conversation first
     if (isDraftMode) {
-      console.log('[ChatPage] Creating new conversation from draft mode');
+      console.log(`[ChatPage] Creating new conversation from draft mode`);
       const newConversation = await createNewConversation();
       
       if (newConversation?.id) {
@@ -402,6 +402,7 @@ export function ChatPage() {
                                         <span>✏️</span> Rename
                                       </button>
 
+                                      {/* Menu Options */}
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();

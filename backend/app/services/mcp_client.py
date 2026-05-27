@@ -25,21 +25,76 @@ class MCPClient:
         self._exit_stack: AsyncExitStack | None = None
         self._lock = asyncio.Lock()
 
+    async def _reset_session(self) -> None:
+        """Safely dispose current MCP session and force a reconnect on next use."""
+        async with self._lock:
+            if self._exit_stack is not None:
+                try:
+                    await self._exit_stack.aclose()
+                except Exception as exc:
+                    logger.debug("[MCPClient] Error while closing MCP session: %s", exc)
+            self._session = None
+            self._exit_stack = None
+
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         logger.debug(f"[MCPClient] Calling tool '{tool_name}' with arguments: {arguments}")
-        session = await self._ensure_session()
-        timeout_seconds = max(settings.RESEARCH_MCP_TOOL_TIMEOUT_SECONDS, 5.0)
-        
-        try:
-            logger.info(f"[MCPClient] Calling MCP tool '{tool_name}' with args: {arguments}")
-            result = await asyncio.wait_for(session.call_tool(tool_name, arguments), timeout=timeout_seconds)
-            logger.debug(f"[MCPClient] Raw result object: {result}, type: {type(result)}")
-        except asyncio.TimeoutError:
-            logger.error(f"[MCPClient] Tool '{tool_name}' timed out after {timeout_seconds}s")
-            raise RuntimeError(f"MCP tool '{tool_name}' timed out")
-        except Exception as exc:
-            logger.exception(f"[MCPClient] Exception calling tool '{tool_name}': {exc}")
-            raise
+        base_timeout_seconds = max(settings.RESEARCH_MCP_TOOL_TIMEOUT_SECONDS, 5.0)
+        timeout_retry_count = max(settings.RESEARCH_MCP_TOOL_TIMEOUT_RETRIES, 0)
+        timeout_multiplier = max(settings.RESEARCH_MCP_TOOL_TIMEOUT_MULTIPLIER, 1.0)
+        max_timeout_seconds = max(settings.RESEARCH_MCP_TOOL_MAX_TIMEOUT_SECONDS, base_timeout_seconds)
+
+        result = None
+        total_attempts = timeout_retry_count + 1
+        last_timeout: asyncio.TimeoutError | None = None
+
+        for attempt in range(1, total_attempts + 1):
+            timeout_seconds = min(
+                base_timeout_seconds * (timeout_multiplier ** (attempt - 1)),
+                max_timeout_seconds,
+            )
+            session = await self._ensure_session()
+            try:
+                logger.info(
+                    "[MCPClient] Calling MCP tool '%s' (attempt %d/%d, timeout=%.1fs) with args: %s",
+                    tool_name,
+                    attempt,
+                    total_attempts,
+                    timeout_seconds,
+                    arguments,
+                )
+                result = await asyncio.wait_for(
+                    session.call_tool(tool_name, arguments),
+                    timeout=timeout_seconds,
+                )
+                logger.debug(f"[MCPClient] Raw result object: {result}, type: {type(result)}")
+                break
+            except asyncio.TimeoutError as exc:
+                last_timeout = exc
+                logger.warning(
+                    "[MCPClient] Tool '%s' timed out after %.1fs on attempt %d/%d",
+                    tool_name,
+                    timeout_seconds,
+                    attempt,
+                    total_attempts,
+                )
+                await self._reset_session()
+                if attempt < total_attempts:
+                    continue
+                logger.error(
+                    "[MCPClient] Tool '%s' timed out after %d attempts (last timeout %.1fs)",
+                    tool_name,
+                    total_attempts,
+                    timeout_seconds,
+                )
+                raise RuntimeError(
+                    f"MCP tool '{tool_name}' timed out after {total_attempts} attempts"
+                ) from last_timeout
+            except Exception as exc:
+                logger.exception(f"[MCPClient] Exception calling tool '{tool_name}': {exc}")
+                raise
+
+        if result is None:
+            raise RuntimeError(f"MCP tool '{tool_name}' returned no result")
 
         # Check for error in multiple ways - MCP protocol can use different attribute names
         is_error = (

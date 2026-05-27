@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "amzur-simple-chatbot"
     ENVIRONMENT: str = "development"
+    N8N_WEBHOOK_URL: str = ""
 
     # Amzur LiteLLM Proxy
     LITELLM_PROXY_URL: str = "https://litellm.amzur.com"
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
     RESEARCH_MCP_SERVER_SCRIPT: str = str(BASE_DIR.parent / "mcp_server" / "server.py")
     RESEARCH_MCP_SERVER_CWD: str = str(BASE_DIR.parent)
     RESEARCH_MCP_TOOL_TIMEOUT_SECONDS: float = 45.0
+    RESEARCH_MCP_TOOL_TIMEOUT_RETRIES: int = 2
+    RESEARCH_MCP_TOOL_TIMEOUT_MULTIPLIER: float = 1.5
+    RESEARCH_MCP_TOOL_MAX_TIMEOUT_SECONDS: float = 120.0
     RESEARCH_MCP_LOG_LEVEL: str = "INFO"
     
     # Google Gemini

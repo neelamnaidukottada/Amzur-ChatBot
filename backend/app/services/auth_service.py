@@ -1,5 +1,8 @@
 """Authentication service for user management and JWT tokens."""
 
+from datetime import datetime
+from typing import Tuple
+
 from sqlalchemy.orm import Session
 from google.auth.transport import requests
 from google.oauth2 import id_token
@@ -77,7 +80,7 @@ class AuthService:
         return user
 
     @staticmethod
-    def authenticate_google_user(db: Session, token: str) -> User:
+    def authenticate_google_user(db: Session, token: str) -> Tuple[User, bool]:
         """
         Authenticate a user via Google OAuth.
         
@@ -85,8 +88,8 @@ class AuthService:
             db: Database session.
             token: Google OAuth token from frontend.
             
-        Returns:
-            User object (creates new user if doesn't exist).
+            Returns:
+                Tuple of (user, created_new_user).
             
         Raises:
             ValueError: If token verification fails.
@@ -111,10 +114,10 @@ class AuthService:
             if user:
                 # Update user info if needed
                 user.google_email = email
-                user.updated_at = __import__("datetime").datetime.utcnow()
+                user.updated_at = datetime.utcnow()
                 db.commit()
                 db.refresh(user)
-                return user
+                return user, False
             
             # Check if user with this email exists (from previous email/password signup)
             user = db.query(User).filter(User.email == email).first()
@@ -124,10 +127,10 @@ class AuthService:
                 user.google_id = google_id
                 user.google_email = email
                 user.auth_provider = "google"
-                user.updated_at = __import__("datetime").datetime.utcnow()
+                user.updated_at = datetime.utcnow()
                 db.commit()
                 db.refresh(user)
-                return user
+                return user, False
             
             # Create new Google user
             user = User(
@@ -143,7 +146,7 @@ class AuthService:
             db.add(user)
             db.commit()
             db.refresh(user)
-            return user
+            return user, True
             
         except ValueError as e:
             raise ValueError(f"Google authentication failed: {str(e)}")

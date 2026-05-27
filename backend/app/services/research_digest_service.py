@@ -77,14 +77,28 @@ class ResearchDigestService:
                 "data": {"start": start, "batch_size": batch_size},
             }
 
-            papers = await self._search_arxiv(
-                query=normalized_query,
-                start=start,
-                max_results=batch_size,
-                categories=normalized_categories,
-                date_from=date_from,
-                date_to=date_to,
-            )
+            try:
+                papers = await self._search_arxiv(
+                    query=normalized_query,
+                    start=start,
+                    max_results=batch_size,
+                    categories=normalized_categories,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+            except RuntimeError as exc:
+                logger.error("[ResearchDigest] arXiv search failed on round %d: %s", rounds_completed, exc)
+                yield {
+                    "type": "status",
+                    "stage": "search",
+                    "message": "arXiv search timed out after retries. Finalizing with available results.",
+                    "data": {
+                        "round": rounds_completed,
+                        "error": str(exc),
+                    },
+                }
+                break
+
             if not papers:
                 yield {
                     "type": "status",
@@ -231,7 +245,8 @@ class ResearchDigestService:
 
     @staticmethod
     def _build_arxiv_search_query(query: str, categories: List[str]) -> str:
-        text_clause = f"all:{query}"
+        normalized = query.strip()
+        text_clause = normalized if normalized.lower().startswith("all:") else f"all:{normalized}"
         if not categories:
             return text_clause
 

@@ -511,7 +511,7 @@ export function ChatPage() {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-white">
+      <div className="flex-1 flex flex-col bg-gradient-to-b from-blue-100 via-blue-50 to-blue-100">
         {/* Chat Content */}
         <div className="flex-1 overflow-y-auto flex flex-col">
           {messages.length === 0 ? (
@@ -582,7 +582,7 @@ export function ChatPage() {
         )}
 
         {/* Input area */}
-        <div className="p-4 bg-white">
+        <div className="p-4 bg-gradient-to-b from-blue-50 to-blue-100">
           <div className="max-w-4xl mx-auto">
             <InputBar 
               onSendMessage={handleSendMessageWithFiles}
